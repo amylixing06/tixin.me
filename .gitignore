@@ -7,6 +7,12 @@ stagewise-dev.js
 # 忽略AI操作检查程序
 final_review_gate.py
 
+# 忽略SvelteKit等自动产物
+singletons.*.js
+
+# 忽略历史/备用便签demo
+floaty-global-note.html
+
 # 其他常见忽略
 .DS_Store
 node_modules/
