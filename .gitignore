@@ -1,0 +1,14 @@
+# 忽略所有chunks相关
+chunks/
+
+# 忽略stagewise增值税插件
+stagewise-dev.js
+
+# 忽略AI操作检查程序
+final_review_gate.py
+
+# 其他常见忽略
+.DS_Store
+node_modules/
+*.log
+*.tmp
