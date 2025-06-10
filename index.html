@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>全局悬浮便签</title>
+		<meta http-equiv="content-security-policy" content="script-src 'self' https://js.monitor.azure.com/ 'sha256-cSBJfPkz13NM/gmgozcPU7VjQCXDiFGpGD7BOplHiD8='">
+		<link rel="icon" href="./favicon.png" />
+		<link rel="manifest" href="/manifest.json">
+		<meta name="theme-color" content="#2D3748">
+		<meta name="apple-mobile-web-app-capable" content="yes">
+		<meta name="apple-mobile-web-app-status-bar-style" content="#2D3748">
+	</head>
+	<body style="margin:0;padding:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;background:#f6f6f6;">
+		<button id="floaty-btn" style="margin-top:80px;padding:22px 64px;font-size:1.5rem;font-weight:bold;border:none;border-radius:12px;background:#2D3748;color:#FFD166;box-shadow:0 6px 24px rgba(45,55,72,0.18);cursor:pointer;transition:filter 0.2s,box-shadow 0.2s;outline:none;">创建悬浮便签</button>
+		<script>
+		const btn = document.getElementById('floaty-btn');
+		btn.onmouseover = function(){btn.style.filter='brightness(1.12)';btn.style.boxShadow='0 8px 32px rgba(45,55,72,0.28)';};
+		btn.onmouseout = function(){btn.style.filter='none';btn.style.boxShadow='0 6px 24px rgba(45,55,72,0.18)';};
+		if ('serviceWorker' in navigator) {
+			navigator.serviceWorker.register('/service-worker.js');
+		}
+		</script>
+		<script src="floaty.js"></script>
+	</body>
+</html>

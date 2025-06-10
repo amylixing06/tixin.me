@@ -1,0 +1,15 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 全局悬浮便签（画中画窗口）核心逻辑
+
+- 入口按钮在主页面，点击后优先通过 `documentPictureInPicture.requestWindow()` 打开画中画窗口。
+- 在画中画窗口下，动态插入 `<textarea>`，实现基础输入、内容同步、颜色切换。
+- textarea 高度自适应内容，最大高度为窗口 88%，无滚动条，内容全部可见。
+- 颜色切换按钮切换背景色并同步到 localStorage。
+- 输入内容和颜色均实时同步到 localStorage，并通过 storage 事件实现主页面与画中画窗口的内容同步。
+- 富文本编辑器（Quill）相关代码已注释，后续可随时切换回富文本。
+
+详见：[floaty.js](mdc:floaty.js)

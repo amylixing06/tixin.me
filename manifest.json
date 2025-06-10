@@ -1,0 +1,21 @@
+{
+  "name": "全局悬浮便签",
+  "short_name": "悬浮便签",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f6f6f6",
+  "theme_color": "#2D3748",
+  "description": "极简全局悬浮便签，支持PWA纯文本输入与颜色分类。",
+  "icons": [
+    {
+      "src": "favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

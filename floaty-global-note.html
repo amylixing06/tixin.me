@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>全局悬浮便签</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    #floaty-note {
+      position: fixed;
+      right: 40px;
+      bottom: 40px;
+      width: 240px;
+      min-height: 120px;
+      background: rgba(255,255,180,0.98);
+      box-shadow: 0 2px 12px #888;
+      border-radius: 10px;
+      padding: 14px;
+      z-index: 9999;
+      resize: both;
+      overflow: auto;
+      cursor: move;
+      display: flex;
+      flex-direction: column;
+    }
+    #floaty-note textarea {
+      width: 100%;
+      height: 80px;
+      border: none;
+      background: transparent;
+      resize: none;
+      outline: none;
+      font-size: 15px;
+      flex: 1;
+    }
+    #open-floaty-note {
+      position: fixed;
+      right: 40px;
+      bottom: 100px;
+      z-index: 10000;
+      padding: 10px 18px;
+      border-radius: 50%;
+      background: #ffd600;
+      border: none;
+      box-shadow: 0 2px 8px #888;
+      cursor: pointer;
+      font-size: 22px;
+    }
+    #note-list {
+      position: fixed;
+      right: 40px;
+      bottom: 160px;
+      z-index: 10000;
+      background: #fffbe6;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px #888;
+      padding: 8px 12px;
+      min-width: 120px;
+      font-size: 14px;
+      display: none;
+    }
+    #note-list.active { display: block; }
+    #note-list-title { font-weight: bold; margin-bottom: 6px; }
+    .note-list-item { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+    .note-list-item:last-child { margin-bottom: 0; }
+    .note-list-close { color: #f33; cursor: pointer; margin-left: 8px; }
+  </style>
+</head>
+<body>
+  <!-- 新建悬浮便签按钮 -->
+  <button id="open-floaty-note" title="新建全局悬浮便签">📝</button>
+  <div id="note-list">
+    <div id="note-list-title">已打开便签</div>
+    <div id="note-list-items"></div>
+  </div>
+  <script>
+  // 多便签全局管理
+  (function(){
+    // 便签唯一ID生成
+    function genId() {
+      return 'note_' + Date.now() + '_' + Math.floor(Math.random()*10000);
+    }
+    // 管理所有已打开便签窗口
+    window.openedNotes = window.openedNotes || [];
+    // 新建便签窗口
+    document.getElementById('open-floaty-note').onclick = function() {
+      var noteId = genId();
+      var win = window.open(window.location.pathname + '?noteId=' + noteId, '', 'width=260,height=180,left=200,top=200,resizable=yes,scrollbars=no,toolbar=no,location=no,status=no,menubar=no');
+      if(win) {
+        window.openedNotes.push({id: noteId, win: win});
+        updateNoteList();
+      }
+    };
+    // 便签列表管理UI
+    function updateNoteList() {
+      var list = document.getElementById('note-list-items');
+      list.innerHTML = '';
+      window.openedNotes = window.openedNotes.filter(n => !n.win.closed);
+      window.openedNotes.forEach(n => {
+        var div = document.createElement('div');
+        div.className = 'note-list-item';
+        div.textContent = n.id;
+        var closeBtn = document.createElement('span');
+        closeBtn.className = 'note-list-close';
+        closeBtn.textContent = '×';
+        closeBtn.onclick = function(e) {
+          e.stopPropagation();
+          try{ n.win.close(); }catch(e){}
+          updateNoteList();
+        };
+        div.appendChild(closeBtn);
+        list.appendChild(div);
+      });
+      document.getElementById('note-list').className = window.openedNotes.length ? 'active' : '';
+    }
+    // 定时刷新便签列表，移除已关闭窗口
+    setInterval(updateNoteList, 2000);
+    // 便签窗口实现
+    var url = new URL(window.location.href);
+    var noteId = url.searchParams.get('noteId');
+    if(noteId) {
+      document.body.innerHTML = '';
+      var note = document.createElement('div');
+      note.style = 'position:fixed;left:0;top:0;width:100vw;height:100vh;background:rgba(255,255,180,0.98);box-shadow:0 2px 12px #888;border-radius:10px;padding:14px;z-index:9999;resize:both;overflow:auto;display:flex;flex-direction:column;';
+      // 颜色选择
+      var colorBar = document.createElement('div');
+      colorBar.style = 'margin-bottom:8px;';
+      ['#fff9c4','#ffe0b2','#b2dfdb','#bbdefb','#f8bbd0'].forEach(function(color){
+        var cbtn = document.createElement('span');
+        cbtn.style = 'display:inline-block;width:18px;height:18px;border-radius:50%;margin-right:6px;background:'+color+';border:1.5px solid #aaa;cursor:pointer;vertical-align:middle;';
+        cbtn.onclick = function(){ note.style.background = color; localStorage.setItem(noteId+'_color', color); };
+        colorBar.appendChild(cbtn);
+      });
+      note.appendChild(colorBar);
+      // 关闭按钮
+      var closeBtn = document.createElement('span');
+      closeBtn.textContent = '×';
+      closeBtn.style = 'position:absolute;top:10px;right:18px;font-size:22px;color:#444;cursor:pointer;';
+      closeBtn.onclick = function(){ window.close(); };
+      note.appendChild(closeBtn);
+      // 文本域
+      var textarea = document.createElement('textarea');
+      textarea.id = 'floaty-note-content';
+      textarea.style = 'width:100%;height:80px;border:none;background:transparent;resize:none;outline:none;font-size:15px;flex:1;';
+      textarea.value = localStorage.getItem(noteId+'_content') || '';
+      textarea.oninput = function() {
+        localStorage.setItem(noteId+'_content', textarea.value);
+      };
+      note.appendChild(textarea);
+      document.body.appendChild(note);
+      // 恢复颜色
+      var color = localStorage.getItem(noteId+'_color');
+      if(color) note.style.background = color;
+      // 恢复位置
+      var pos = JSON.parse(localStorage.getItem(noteId+'_pos') || '{}');
+      if(pos.left) note.style.left = pos.left;
+      if(pos.top) note.style.top = pos.top;
+      // 拖拽逻辑
+      let isDragging = false, startX, startY, startLeft, startTop;
+      note.addEventListener('mousedown', function(e) {
+        if(e.target !== textarea && e.target !== closeBtn && e.target !== colorBar) {
+          isDragging = true;
+          startX = e.clientX;
+          startY = e.clientY;
+          startLeft = parseInt(note.style.left) || 0;
+          startTop = parseInt(note.style.top) || 0;
+          document.body.style.userSelect = 'none';
+        }
+      });
+      document.addEventListener('mousemove', function(e) {
+        if(isDragging) {
+          note.style.left = (startLeft + (e.clientX - startX)) + 'px';
+          note.style.top = (startTop + (e.clientY - startY)) + 'px';
+        }
+      });
+      document.addEventListener('mouseup', function() {
+        if(isDragging) {
+          isDragging = false;
+          localStorage.setItem(noteId+'_pos', JSON.stringify({left: note.style.left, top: note.style.top}));
+          document.body.style.userSelect = '';
+        }
+      });
+    }
+  })();
+  </script>
+</body>
+</html> 
