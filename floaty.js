@@ -23,7 +23,7 @@ function renderNotesList() {
     return;
   }
   list.innerHTML = notes.map(note =>
-    `<div style="margin-bottom:8px;padding:8px 12px;background:#f8f8f8;border-radius:6px;min-width:180px;max-width:400px;display:flex;align-items:center;">
+    `<div style="margin-bottom:8px;padding:8px 12px;background:#f8f8f8;border-radius:6px;min-width:160px;display:flex;align-items:center;">
       <span style="flex:1;white-space:pre-line;">${note.content.replace(/</g,'&lt;')}</span>
       <button data-id="${note.id}" class="delete-note-btn" style="margin-left:8px;">删除</button>
     </div>`
@@ -90,7 +90,7 @@ window.addEventListener('DOMContentLoaded', function() {
     const list = document.getElementById('notes-list');
     if (list) {
       const { content, color } = getNoteData();
-      list.innerHTML = `<div style="background:${color};padding:12px 16px;border-radius:8px;min-width:180px;max-width:400px;word-break:break-all;">${content || '暂无便签'}</div>`;
+      list.innerHTML = `<div style="background:${color};padding:12px 16px;border-radius:8px;min-width:160px;word-break:break-all;">${content || '暂无便签'}</div>`;
     }
   }
   updateNotesList();
@@ -212,10 +212,10 @@ window.addEventListener('DOMContentLoaded', function() {
       // 动态分配高度和限制最小宽高
       function layout() {
         const winH = Math.max(pipWin.innerHeight, 150);
-        const winW = Math.max(pipWin.innerWidth, 200);
+        const winW = Math.max(pipWin.innerWidth, 160);
         textarea.style.height = Math.floor(winH * 0.85) + 'px';
         btnRow.style.height = Math.ceil(winH * 0.15) + 'px';
-        doc.body.style.minWidth = '200px';
+        doc.body.style.minWidth = '160px';
         doc.body.style.minHeight = '150px';
       }
       layout();

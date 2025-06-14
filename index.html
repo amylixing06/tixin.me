@@ -29,12 +29,28 @@
 			<img src="./wechat-qr.jpg" alt="微信意见反馈二维码" style="width:220px;max-width:90vw;display:block;margin:0 auto 8px auto;border-radius:12px;box-shadow:0 2px 8px #ccc;">
 			<div style="color:#888;font-size:0.98rem;margin-top:4px;">扫码上方二维码，意见反馈/加好友</div>
 		</div>
+		<div style="margin-top:48px;text-align:center;color:#888;font-size:0.95rem;line-height:1.7;">
+			<span>使用本产品即代表您同意</span>
+			<a href="privacy.html" style="color:#2D3748;text-decoration:underline;margin:0 4px;">隐私条款</a>
+			<span>、</span>
+			<a href="terms.html" style="color:#2D3748;text-decoration:underline;margin:0 4px;">服务条款</a>
+			<span>和</span>
+			<a href="cache.html" style="color:#2D3748;text-decoration:underline;margin:0 4px;">缓存条款</a>
+			<span>。您的数据仅保存在本地浏览器缓存，不会上传服务器。</span>
+		</div>
 		<script>
 		const btn = document.getElementById('floaty-btn');
 		btn.onmouseover = function(){btn.style.filter='brightness(1.12)';btn.style.boxShadow='0 8px 32px rgba(45,55,72,0.28)';};
 		btn.onmouseout = function(){btn.style.filter='none';btn.style.boxShadow='0 6px 24px rgba(45,55,72,0.18)';};
 		if ('serviceWorker' in navigator) {
 			navigator.serviceWorker.register('/service-worker.js');
+		}
+		// 检查URL参数，自动弹出悬浮便签
+		if (location.search.includes('autoFloaty=1')) {
+		  window.addEventListener('DOMContentLoaded', function() {
+			const btn = document.getElementById('floaty-btn');
+			if (btn) btn.click();
+		  });
 		}
 		</script>
 		<script src="floaty.js"></script>
