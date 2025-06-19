@@ -16,6 +16,9 @@ floaty-global-note.html
 # 忽略VS Code配置
 .vscode/
 
+# 忽略Cursor配置
+.cursor/
+
 # 忽略临时缓存清理脚本
 clear-cache.js
 
