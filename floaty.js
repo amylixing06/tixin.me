@@ -1,3 +1,25 @@
+// 尝试导入 authStateListener，如果失败则使用空函数
+let authStateListener = (callback) => { callback(null); };
+let currentUser = null;
+
+// 尝试导入 firebase.js
+import('./firebase.js').then(module => {
+  authStateListener = module.authStateListener;
+  console.log('成功导入 firebase.js');
+  
+  // 监听用户登录状态
+  authStateListener(user => {
+    currentUser = user;
+    if (user) {
+      console.log('用户已登录，准备同步便签');
+      // 从云端加载便签
+      loadNotesFromCloud();
+    }
+  });
+}).catch(err => {
+  console.error('无法加载 firebase.js 模块:', err);
+});
+
 // 工具函数：生成唯一ID
 function uuid() {
   return 'xxxx-4xxx-yxxx-xxxx'.replace(/[xy]/g, function(c) {
@@ -11,89 +33,333 @@ function getNotes() {
     return JSON.parse(localStorage.getItem('floaty_notes') || '[]');
   } catch { return []; }
 }
+
 function saveNotes(notes) {
+  // 过滤掉内容为空的便签
+  notes = notes.filter(note => note && note.content && note.content.trim());
+  
   localStorage.setItem('floaty_notes', JSON.stringify(notes));
-}
-function renderNotesList() {
-  const notes = getNotes();
-  const list = document.getElementById('notes-list');
-  if (!list) return;
-  if (notes.length === 0) {
-    list.innerHTML = '<div style="color:#888;">暂无便签</div>';
-    return;
-  }
-  list.innerHTML = notes.map(note =>
-    `<div style="margin-bottom:8px;padding:8px 12px;background:#f8f8f8;border-radius:6px;min-width:160px;display:flex;align-items:center;">
-      <span style="flex:1;white-space:pre-line;">${note.content.replace(/</g,'&lt;')}</span>
-      <button data-id="${note.id}" class="delete-note-btn" style="margin-left:8px;">删除</button>
-    </div>`
-  ).join('');
-  // 绑定删除
-  list.querySelectorAll('.delete-note-btn').forEach(btn => {
-    btn.onclick = function() {
-      const id = btn.getAttribute('data-id');
-      const notes = getNotes().filter(n => n.id !== id);
-      saveNotes(notes);
-      renderNotesList();
-    };
-  });
+  // 触发storage事件，同步到其他窗口
+  window.dispatchEvent(new StorageEvent('storage', {
+    key: 'floaty_notes',
+    newValue: JSON.stringify(notes)
+  }));
+  
+  // 如果用户已登录，同步到云端
+  syncNotesToCloud(notes);
 }
 
-window.addEventListener('DOMContentLoaded', function() {
+// 同步便签到云端
+async function syncNotesToCloud(notes) {
+  if (!currentUser || !window.firebaseDB) return;
+  
+  try {
+    console.log('开始同步便签到云端...');
+    
+    // 获取当前时间戳
+    const timestamp = Date.now();
+    
+    // 准备要保存的数据
+    const notesData = {
+      notes: notes,
+      updatedAt: window.firebaseDB.serverTimestamp ? window.firebaseDB.serverTimestamp() : timestamp
+    };
+    
+    // 调用Firebase同步函数
+    await window.firebaseDB.syncNotesToCloud(currentUser.uid, notesData);
+    
+    console.log('便签已同步到云端');
+  } catch (error) {
+    console.error('同步便签到云端失败:', error);
+  }
+}
+
+// 从云端加载便签
+async function loadNotesFromCloud() {
+  if (!currentUser || !window.firebaseDB) return;
+  
+  try {
+    console.log('正在从云端加载便签...');
+    
+    // 调用Firebase加载函数
+    const result = await window.firebaseDB.loadNotesFromCloud(currentUser.uid);
+    
+    if (result && result.notes) {
+      console.log('从云端加载到便签数据:', result.notes.length, '条记录');
+      
+      // 获取本地便签
+      const localNotes = getNotes();
+      
+      // 合并云端和本地便签（去重）
+      const mergedNotes = mergeNotes(localNotes, result.notes);
+      
+      // 更新本地存储
+      localStorage.setItem('floaty_notes', JSON.stringify(mergedNotes));
+      
+      // 触发storage事件，更新界面
+      window.dispatchEvent(new StorageEvent('storage', {
+        key: 'floaty_notes',
+        newValue: JSON.stringify(mergedNotes)
+      }));
+      
+      // 更新便签列表
+      updateAllNotes();
+      
+      return true;
+    } else {
+      console.log('云端没有便签数据或加载失败');
+      return false;
+    }
+  } catch (error) {
+    console.error('从云端加载便签失败:', error);
+    return false;
+  }
+}
+
+// 合并便签（去重并保留最新的）
+function mergeNotes(localNotes, cloudNotes) {
+  // 创建一个Map，键为便签ID，值为便签对象
+  const notesMap = new Map();
+  
+  // 先添加本地便签
+  localNotes.forEach(note => {
+    notesMap.set(note.id, note);
+  });
+  
+  // 再添加云端便签，如果ID已存在则比较更新时间
+  cloudNotes.forEach(note => {
+    const existingNote = notesMap.get(note.id);
+    
+    if (!existingNote || (note.updatedAt > existingNote.updatedAt)) {
+      notesMap.set(note.id, note);
+    }
+  });
+  
+  // 转换回数组并按更新时间排序
+  return Array.from(notesMap.values())
+    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+}
+
+// 移除 DOMContentLoaded 事件，直接执行代码
+(function initFloatyNote() {
+  console.log('初始化便签功能');
+  
   const btn = document.getElementById('floaty-btn');
   if (!('documentPictureInPicture' in window)) {
-    alert('当前浏览器不支持全局悬浮便签');
-    btn.disabled = true;
+    console.error('当前浏览器不支持全局悬浮便签 (documentPictureInPicture API)');
+    if (btn) btn.disabled = true;
+    // 给新建便签按钮添加提示
+    const newBtn = document.getElementById('new-note-btn');
+    if (newBtn) {
+      newBtn.disabled = true;
+      newBtn.title = '当前浏览器不支持全局悬浮便签';
+      newBtn.onclick = function() {
+        alert('当前浏览器不支持全局悬浮便签，请使用最新版Chrome浏览器');
+      };
+    }
     return;
   }
+  
   const note = document.getElementById('floaty-note');
   const textarea = note ? note.querySelector('textarea') : null;
   const newBtn = document.getElementById('new-note-btn');
 
-  renderNotesList();
-
-  // 新建便签
+  // 新建便签 - 确保按钮存在并正确绑定事件
   if (newBtn) {
+    console.log('找到新建便签按钮，绑定点击事件');
     newBtn.onclick = function() {
+      console.log('新建便签按钮被点击');
       openFloatyNote('');
     };
+  } else {
+    console.error('未找到新建便签按钮 (id="new-note-btn")');
   }
 
   const COLORS = [
     '#fff', '#fffbe6', '#fff0f6', '#e6f7ff'
   ];
 
-  function getNoteData() {
+  function getNoteData(noteId) {
+    if (noteId) {
+      const notes = getNotes();
+      const note = notes.find(n => n.id === noteId);
+      if (note) {
+        return {
+          id: note.id,
+          content: note.content || '',
+          color: note.color || COLORS[0]
+        };
+      }
+    }
+    
+    // 兼容旧版本的单便签
     return {
       content: localStorage.getItem('floaty_note_content') || '',
       color: localStorage.getItem('floaty_note_color') || COLORS[0]
     };
   }
-  function saveNoteData(content, color) {
-    localStorage.setItem('floaty_note_content', content);
-    localStorage.setItem('floaty_note_color', color);
-    window.dispatchEvent(new StorageEvent('storage', {
-      key: 'floaty_note_content', newValue: content
-    }));
-    window.dispatchEvent(new StorageEvent('storage', {
-      key: 'floaty_note_color', newValue: color
-    }));
+  
+  function saveNoteData(content, color, noteId) {
+    if (!content.trim()) return;
+    
+    let notes = getNotes();
+    
+    if (noteId) {
+      // 更新已有便签
+      notes = notes.map(n => n.id === noteId ? { 
+        ...n, 
+        content, 
+        color, 
+        updatedAt: Date.now() 
+      } : n);
+    } else {
+      // 创建新便签
+      const newNote = {
+        id: uuid(),
+        content,
+        color,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      };
+      notes.unshift(newNote); // 添加到数组开头
+    }
+    
+    saveNotes(notes);
+    
+    // 更新主页面上的便签显示
+    updateAllNotes();
+  }
+  
+  // 更新主页面上的便签显示
+  function updateMainPageNotes(content, color) {
+    const userNote = document.getElementById('user-note');
+    
+    if (userNote) {
+      if (content && content.trim()) {
+        userNote.textContent = content;
+        userNote.style.background = color || "#fffbe6";
+        userNote.style.display = 'block';
+      } else {
+        userNote.style.display = 'none';
+      }
+    }
+  }
+
+  // 更新所有便签
+  function updateAllNotes() {
+    const notesList = document.getElementById('notes-list');
+    if (!notesList) {
+      console.error('未找到便签列表容器 (id="notes-list")');
+      return;
+    }
+    
+    const notes = getNotes();
+    
+    if (notes.length === 0) {
+      notesList.innerHTML = '<div id="empty-tips" style="text-align:center;padding:32px 0;color:#666;line-height:1.8;margin-top:30px;">'
+        + '<div style="font-size:1.2rem;font-weight:600;margin-bottom:25px;color:#2D3748;">使用说明</div>'
+        + '<div style="max-width:380px;margin:0 auto;background:#f9f9f9;padding:20px;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,0.05);">'
+        + '<div style="text-align:left;">'
+        + '<div style="margin-bottom:15px;display:flex;align-items:center;">'
+        + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">1</span>'
+        + '<span>点击"新建便签"，即可开启全局悬浮便签</span>'
+        + '</div>'
+        + '<div style="margin-bottom:15px;display:flex;align-items:center;">'
+        + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">2</span>'
+        + '<span>输入内容自动保存，支持四种颜色切换</span>'
+        + '</div>'
+        + '<div style="margin-bottom:15px;display:flex;align-items:center;">'
+        + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">3</span>'
+        + '<span>可添加到主屏幕，实现离线使用体验</span>'
+        + '</div>'
+        + '<div style="margin-bottom:0;display:flex;align-items:center;">'
+        + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">4</span>'
+        + '<span>登录后便签内容自动同步到云端</span>'
+        + '</div>'
+        + '</div></div></div>';
+      return;
+    }
+    
+    let html = '';
+    notes.forEach(note => {
+      html += `
+        <div class="note-item" data-id="${note.id}" style="background:${note.color || COLORS[0]};margin-bottom:15px;padding:12px 16px;border-radius:8px;position:relative;">
+          <div class="note-content" style="word-break:break-all;margin-right:25px;">${note.content || ''}</div>
+          <div class="note-actions" style="position:absolute;top:8px;right:8px;">
+            <button class="edit-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;margin-right:4px;">✏️</button>
+            <button class="delete-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">❌</button>
+          </div>
+          <div class="note-time" style="font-size:12px;color:#666;margin-top:8px;text-align:right;">
+            ${new Date(note.updatedAt || Date.now()).toLocaleString()}
+          </div>
+        </div>
+      `;
+    });
+    
+    notesList.innerHTML = html;
+    
+    // 添加事件监听
+    notesList.querySelectorAll('.edit-note-btn').forEach(btn => {
+      btn.onclick = function(e) {
+        e.stopPropagation();
+        const noteId = this.getAttribute('data-id');
+        const note = notes.find(n => n.id === noteId);
+        if (note) {
+          openFloatyNote(note.content, noteId);
+        }
+      };
+    });
+    
+    notesList.querySelectorAll('.delete-note-btn').forEach(btn => {
+      btn.onclick = function(e) {
+        e.stopPropagation();
+        const noteId = this.getAttribute('data-id');
+        if (confirm('确定要删除这个便签吗？')) {
+          const updatedNotes = notes.filter(n => n.id !== noteId);
+          saveNotes(updatedNotes);
+          updateAllNotes();
+        }
+      };
+    });
+    
+    // 点击便签内容区域也可以编辑
+    notesList.querySelectorAll('.note-content').forEach(content => {
+      content.onclick = function() {
+        const noteId = this.parentNode.getAttribute('data-id');
+        const note = notes.find(n => n.id === noteId);
+        if (note) {
+          openFloatyNote(note.content, noteId);
+        }
+      };
+    });
+    
+    // 显示云同步状态
+    const syncStatus = document.createElement('div');
+    syncStatus.style = 'text-align:center;margin-top:20px;font-size:12px;color:#666;';
+    syncStatus.id = 'sync-status';
+    
+    if (currentUser) {
+      syncStatus.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;gap:8px;"><span>✅ 已登录，便签内容自动同步到云端</span></div>';
+    } else {
+      syncStatus.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;gap:8px;"><span>ℹ️ 登录后便签内容将自动同步到云端</span></div>';
+    }
+    
+    notesList.appendChild(syncStatus);
   }
 
   window.addEventListener('storage', function(e) {
-    if (e.key === 'floaty_note_content' || e.key === 'floaty_note_color') {
-      updateNotesList();
+    if (e.key === 'floaty_notes') {
+      updateAllNotes();
     }
   });
 
-  function updateNotesList() {
-    const list = document.getElementById('notes-list');
-    if (list) {
-      const { content, color } = getNoteData();
-      list.innerHTML = `<div style="background:${color};padding:12px 16px;border-radius:8px;min-width:160px;word-break:break-all;">${content || '暂无便签'}</div>`;
-    }
+  // 初始化便签列表
+  updateAllNotes();
+  
+  // 如果用户已登录，尝试从云端加载便签
+  if (currentUser) {
+    loadNotesFromCloud();
   }
-  updateNotesList();
 
   // 主页面弹窗初始化 Quill
   let quill;
@@ -138,202 +404,360 @@ window.addEventListener('DOMContentLoaded', function() {
         saveNoteData(textarea.value, textarea.style.background || color);
       };
     }
-    // textarea输入时自动保存
+    
+    // 使用防抖函数，避免频繁创建便签
+    let saveTimeout;
     textarea.oninput = function() {
-      saveNoteData(textarea.value, textarea.style.background || color);
+      // 清除之前的定时器
+      if (saveTimeout) clearTimeout(saveTimeout);
+      
+      // 设置新的定时器，输入停止1秒后自动保存
+      saveTimeout = setTimeout(() => {
+        const val = textarea.value;
+        if (val && val.trim()) {
+          saveNoteData(val, textarea.style.background || color);
+        }
+      }, 1000);
     };
   }
 
-  btn.onclick = async function() {
-    try {
-      const pipWin = await documentPictureInPicture.requestWindow();
-      try { pipWin.resizeTo(200, 150); } catch(e){} // 兼容性处理
-      const doc = pipWin.document;
-      doc.documentElement.style.height = '100%';
-      doc.body.style.height = '100%';
-      doc.body.style.margin = '0';
-      doc.body.style.padding = '0';
-      doc.body.style.border = 'none';
-      doc.body.style.boxSizing = 'border-box';
-      const COLORS = [
-        '#fff', '#fffbe6', '#fff0f6', '#e6f7ff'
-      ];
-      const content = localStorage.getItem('floaty_note_content') || '';
-      const color = localStorage.getItem('floaty_note_color') || COLORS[0];
-      // 创建 textarea
-      const textarea = doc.createElement('textarea');
-      textarea.style = 'width:100%;margin:0;padding:12px 8px 8px 8px;border:none;box-sizing:border-box;resize:none;outline:none;font-size:13px;display:block;';
-      textarea.value = content;
-      textarea.placeholder = '请输入标签内容，下拉可切换颜色';
-      textarea.autofocus = true;
-      textarea.oninput = function() {
-        localStorage.setItem('floaty_note_content', textarea.value);
-      };
-      doc.body.appendChild(textarea);
-      // 颜色选择区和保存按钮
-      const btnRow = doc.createElement('div');
-      btnRow.style = 'display:flex;align-items:center;justify-content:center;gap:16px;min-height:32px;box-sizing:border-box;width:100%;margin:0 0 8px 0;padding:0;border:none;';
-      const colorWrap = doc.createElement('div');
-      colorWrap.style = 'display:flex;justify-content:center;gap:16px;align-items:center;margin-top:8px;margin-bottom:8px;width:100%';
-      const colorNames = ['白色','淡黄','粉红','淡蓝'];
-      COLORS.forEach((c,idx) => {
-        const colorDot = doc.createElement('span');
-        colorDot.style = `width:20px;height:20px;border-radius:50%;border:2px solid #ccc;display:inline-block;cursor:pointer;background:${c};box-shadow:0 1px 4px #0001;margin:0;transition:box-shadow 0.2s,transform 0.2s,border 0.2s;`;
-        colorDot.title = colorNames[idx] || '';
-        if ((textarea.style.background||color) === c) {
-          colorDot.style.border = '2.5px solid #333';
-          colorDot.style.boxShadow = '0 0 0 4px rgba(165,201,202,0.15)';
-          colorDot.style.transform = 'scale(1.15)';
-        }
-        colorDot.onmouseover = function(){ colorDot.style.transform = 'scale(1.10)'; };
-        colorDot.onmouseout = function(){
-          if ((textarea.style.background||color) === c) {
-            colorDot.style.transform = 'scale(1.15)';
-          } else {
-            colorDot.style.transform = 'scale(1)';
-          }
-        };
-        colorDot.onclick = function() {
-          textarea.style.background = c;
-          localStorage.setItem('floaty_note_color', c);
-          colorWrap.querySelectorAll('span').forEach(dot => {
-            dot.style.border = '2px solid #ccc';
-            dot.style.boxShadow = '0 1px 4px #0001';
-            dot.style.transform = 'scale(1)';
-          });
-          colorDot.style.border = '2.5px solid #333';
-          colorDot.style.boxShadow = '0 0 0 4px rgba(165,201,202,0.15)';
-          colorDot.style.transform = 'scale(1.15)';
-        };
-        colorWrap.appendChild(colorDot);
-      });
-      btnRow.appendChild(colorWrap);
-      doc.body.appendChild(btnRow);
-      // 动态分配高度和限制最小宽高
-      function layout() {
-        const winH = Math.max(pipWin.innerHeight, 150);
-        const winW = Math.max(pipWin.innerWidth, 160);
-        textarea.style.height = Math.floor(winH * 0.85) + 'px';
-        btnRow.style.height = Math.ceil(winH * 0.15) + 'px';
-        doc.body.style.minWidth = '160px';
-        doc.body.style.minHeight = '150px';
-      }
-      layout();
-      pipWin.addEventListener('resize', layout);
-      // 去除滚动条
-      const style = doc.createElement('style');
-      style.textContent = 'html,body{overflow:hidden;} textarea::-webkit-scrollbar{display:none;} textarea{overflow:hidden;}';
-      doc.head.appendChild(style);
-    } catch (e) {
-      alert('全局悬浮失败：' + e.message);
-    }
-  };
+  if (btn) {
+    btn.onclick = function() {
+      openFloatyNote('');
+    };
+  }
 
   // 便签弹窗保存逻辑
   if (note && textarea) {
-    // 输入时自动保存
+    // 输入时自动保存，添加防抖
+    let saveTimeout;
     textarea.oninput = function() {
-      const val = textarea.value;
-      if (val.trim()) {
-        let notes = getNotes();
-        if (!note._editingId) {
-          // 新建时，实时保存为一条新便签（只保存一次）
-          if (!note._createdId) {
-            const id = uuid();
-            notes.unshift({ id, content: val, time: Date.now() });
-            note._createdId = id;
-            note._editingId = id;
+      // 清除之前的定时器
+      if (saveTimeout) clearTimeout(saveTimeout);
+      
+      // 设置新的定时器，输入停止1秒后自动保存
+      saveTimeout = setTimeout(() => {
+        const val = textarea.value;
+        if (val.trim()) {
+          if (!note._editingId) {
+            // 新建便签
+            saveNoteData(val, note.style.background || COLORS[1]);
           } else {
-            notes = notes.map(n => n.id === note._createdId ? { ...n, content: val, time: Date.now() } : n);
+            // 更新已有便签
+            saveNoteData(val, note.style.background || COLORS[1], note._editingId);
           }
-        } else {
-          notes = notes.map(n => n.id === note._editingId ? { ...n, content: val, time: Date.now() } : n);
         }
-        saveNotes(notes);
-        renderNotesList();
-      }
+      }, 1000);
     };
+    
     // 失焦时清理编辑状态
     textarea.onblur = function() {
       note._editingId = null;
-      note._createdId = null;
     };
   }
-
-  // 列表点击可编辑
-  document.getElementById('notes-list').onclick = function(e) {
-    const target = e.target;
-    if (target.tagName === 'SPAN' && target.parentNode) {
-      const id = target.parentNode.querySelector('.delete-note-btn')?.getAttribute('data-id');
-      if (id) {
-        const noteObj = getNotes().find(n => n.id === id);
-        if (noteObj) openFloatyNote(noteObj.content, id);
-      }
-    }
-  };
 
   // 弹出全局悬浮便签
   function openFloatyNote(content, editingId) {
-    if (!note || !textarea) return;
-    textarea.value = content || '';
-    note._editingId = editingId || null;
-    note._createdId = null;
-    if ('documentPictureInPicture' in window) {
-      note.style.display = 'block';
-      documentPictureInPicture.requestWindow(note).catch(() => {
-        note.style.display = 'block';
-      });
-    } else {
-      note.style.display = 'block';
+    console.log('openFloatyNote 函数被调用', { content, editingId });
+    
+    // 如果是新建便签（没有editingId），立即生成一个唯一ID
+    const newNoteId = editingId || uuid();
+    console.log('便签ID:', newNoteId, editingId ? '(编辑已有便签)' : '(新建便签)');
+    
+    try {
+      console.log('尝试请求 PiP 窗口');
+      documentPictureInPicture.requestWindow({width: 300, height: 200})
+        .then(win => {
+          console.log('PiP 窗口创建成功');
+          try { win.resizeTo(300, 200); } catch(e){} // 兼容性处理
+          const doc = win.document;
+          doc.documentElement.style.height = '100%';
+          doc.body.style.height = '100%';
+          doc.body.style.margin = '0';
+          doc.body.style.padding = '0';
+          doc.body.style.border = 'none';
+          doc.body.style.boxSizing = 'border-box';
+          
+          // 获取便签数据
+          let noteData = { content: '', color: COLORS[1] };
+          if (editingId) {
+            noteData = getNoteData(editingId);
+          }
+          
+          // 创建便签容器
+          const noteContainer = doc.createElement('div');
+          noteContainer.style = 'width:100%;height:100%;display:flex;flex-direction:column;background:' + (noteData.color || COLORS[1]) + ';border-radius:8px;box-shadow:0 2px 8px rgba(0,0,0,0.1);transition:background 0.3s ease;';
+          doc.body.appendChild(noteContainer);
+          
+          // 创建 textarea
+          const textarea = doc.createElement('textarea');
+          textarea.style = 'width:100%;margin:0;padding:12px 8px 8px 8px;border:none;box-sizing:border-box;resize:none;outline:none;font-size:13px;display:block;background:transparent;flex:1;';
+          textarea.value = content || noteData.content || '';
+          textarea.placeholder = '请输入标签内容，下拉可切换颜色';
+          textarea.autofocus = true;
+          noteContainer.appendChild(textarea);
+          
+          // 使用新建时生成的ID或编辑时的ID
+          let tempNoteId = newNoteId;
+          
+          // 颜色选择区和保存按钮
+          const btnRow = doc.createElement('div');
+          btnRow.style = 'display:flex;align-items:center;justify-content:center;gap:16px;min-height:32px;box-sizing:border-box;width:100%;margin:0 0 8px 0;padding:0;border:none;';
+          const colorWrap = doc.createElement('div');
+          colorWrap.style = 'display:flex;justify-content:center;gap:16px;align-items:center;margin-top:8px;margin-bottom:8px;width:80%';
+          
+          // 添加保存按钮
+          const saveBtn = doc.createElement('button');
+          saveBtn.textContent = editingId ? '更新' : '保存';
+          saveBtn.style = 'padding:4px 10px;background:#2D3748;color:#FFD166;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
+          saveBtn.onclick = function() {
+            const content = textarea.value;
+            const color = noteContainer.style.background;
+            
+            if (content && content.trim()) {
+              // 检查这个ID是否已存在于便签列表中
+              let notes = getNotes();
+              const existingNoteIndex = notes.findIndex(n => n.id === tempNoteId);
+              
+              if (existingNoteIndex === -1) {
+                // 新便签，不存在，则添加
+                const newNote = {
+                  id: tempNoteId,
+                  content: content,
+                  color: color,
+                  createdAt: Date.now(),
+                  updatedAt: Date.now()
+                };
+                notes.unshift(newNote);
+                console.log('创建了新便签，ID:', tempNoteId);
+              } else {
+                // 已存在，则更新
+                notes[existingNoteIndex] = {
+                  ...notes[existingNoteIndex],
+                  content: content,
+                  color: color,
+                  updatedAt: Date.now()
+                };
+                console.log('更新便签，ID:', tempNoteId);
+              }
+              
+              saveNotes(notes);
+              
+              // 更新主页面上的便签显示
+              updateAllNotes();
+              
+              // 显示保存成功提示
+              const tip = doc.createElement('div');
+              tip.textContent = existingNoteIndex !== -1 ? '更新成功' : '保存成功';
+              tip.style = 'position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);color:white;padding:4px 8px;border-radius:4px;font-size:12px;';
+              noteContainer.appendChild(tip);
+              setTimeout(() => tip.remove(), 2000);
+            }
+          };
+          
+          // 禁用自动保存，改为手动保存
+          // 可以添加防抖函数实现输入停止后自动保存
+          let saveTimeout;
+          textarea.oninput = function() {
+            // 清除之前的定时器
+            if (saveTimeout) clearTimeout(saveTimeout);
+            
+            // 设置新的定时器，输入停止1秒后自动保存
+            saveTimeout = setTimeout(() => {
+              const content = textarea.value;
+              const color = noteContainer.style.background;
+              
+              if (content && content.trim()) {
+                // 检查这个ID是否已存在于便签列表中
+                let notes = getNotes();
+                const existingNoteIndex = notes.findIndex(n => n.id === tempNoteId);
+                
+                if (existingNoteIndex === -1) {
+                  // 新便签，不存在，则添加
+                  const newNote = {
+                    id: tempNoteId,
+                    content: content,
+                    color: color,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                  };
+                  notes.unshift(newNote);
+                  console.log('自动保存创建了新便签，ID:', tempNoteId);
+                } else {
+                  // 已存在，则更新
+                  notes[existingNoteIndex] = {
+                    ...notes[existingNoteIndex],
+                    content: content,
+                    color: color,
+                    updatedAt: Date.now()
+                  };
+                  console.log('自动保存更新便签，ID:', tempNoteId);
+                }
+                
+                saveNotes(notes);
+                
+                // 更新主页面上的便签显示
+                updateAllNotes();
+              }
+            }, 1000); // 1秒后自动保存
+          };
+          
+          const colorNames = ['白色','淡黄','粉红','淡蓝'];
+          COLORS.forEach((c,idx) => {
+            const colorDot = doc.createElement('span');
+            colorDot.style = `width:20px;height:20px;border-radius:50%;border:2px solid #ccc;display:inline-block;cursor:pointer;background:${c};box-shadow:0 1px 4px #0001;margin:0;transition:box-shadow 0.2s,transform 0.2s,border 0.2s;`;
+            colorDot.title = colorNames[idx] || '';
+            if ((noteData.color || COLORS[1]) === c) {
+              colorDot.style.border = '2.5px solid #333';
+              colorDot.style.boxShadow = '0 0 0 4px rgba(165,201,202,0.15)';
+              colorDot.style.transform = 'scale(1.15)';
+            }
+            colorDot.onmouseover = function(){ colorDot.style.transform = 'scale(1.10)'; };
+            colorDot.onmouseout = function(){
+              if (noteContainer.style.background === c) {
+                colorDot.style.transform = 'scale(1.15)';
+              } else {
+                colorDot.style.transform = 'scale(1)';
+              }
+            };
+            colorDot.onclick = function() {
+              noteContainer.style.background = c;
+              colorWrap.querySelectorAll('span').forEach(dot => {
+                dot.style.border = '2px solid #ccc';
+                dot.style.boxShadow = '0 1px 4px #0001';
+                dot.style.transform = 'scale(1)';
+              });
+              colorDot.style.border = '2.5px solid #333';
+              colorDot.style.boxShadow = '0 0 0 4px rgba(165,201,202,0.15)';
+              colorDot.style.transform = 'scale(1.15)';
+            };
+            colorWrap.appendChild(colorDot);
+          });
+          btnRow.appendChild(colorWrap);
+          btnRow.appendChild(saveBtn);
+          noteContainer.appendChild(btnRow);
+          
+          // 动态分配高度和限制最小宽高
+          function layout() {
+            const winH = Math.max(win.innerHeight, 150);
+            const winW = Math.max(win.innerWidth, 160);
+            textarea.style.height = Math.floor(winH * 0.85) + 'px';
+            btnRow.style.height = Math.ceil(winH * 0.15) + 'px';
+            doc.body.style.minWidth = '160px';
+            doc.body.style.minHeight = '150px';
+          }
+          layout();
+          win.addEventListener('resize', layout);
+          // 去除滚动条
+          const style = doc.createElement('style');
+          style.textContent = 'html,body{overflow:hidden;} textarea::-webkit-scrollbar{display:none;} textarea{overflow:hidden;}';
+          doc.head.appendChild(style);
+        })
+        .catch(e => {
+          console.error('PiP 窗口创建失败:', e);
+          alert('全局悬浮失败：' + e.message + '\n\n请确认您使用的是最新版Chrome浏览器，并已开启"启用画中画API"功能。');
+        });
+    } catch (e) {
+      console.error('创建悬浮便签出错:', e);
+      alert('创建悬浮便签失败: ' + e.message);
     }
-    textarea.focus();
   }
+  
+  // 将 openFloatyNote 函数暴露到全局，方便调试
+  window.openFloatyNote = openFloatyNote;
+  
+  console.log('便签功能初始化完成');
+})();
 
-  // 判断是否为便签窗口
-  if (window.location.hash === '#floaty-note-window') {
-    document.body.innerHTML = '';
-    const noteWin = document.createElement('div');
-    noteWin.style = 'position:fixed;left:0;top:0;width:100vw;height:100vh;background:#fffbe6;box-shadow:0 2px 12px #888;border-radius:10px;padding:14px;z-index:9999;resize:both;overflow:auto;display:flex;flex-direction:column;';
-    const textarea = document.createElement('textarea');
-    textarea.style = 'width:100%;height:80px;border:none;background:transparent;resize:none;outline:none;font-size:15px;flex:1;';
+// 判断是否为便签窗口
+if (window.location.hash === '#floaty-note-window') {
+  document.body.innerHTML = '';
+  const noteWin = document.createElement('div');
+  noteWin.style = 'position:fixed;left:0;top:0;width:100vw;height:100vh;background:#fffbe6;box-shadow:0 2px 12px #888;border-radius:10px;padding:14px;z-index:9999;resize:both;overflow:auto;display:flex;flex-direction:column;';
+  const textarea = document.createElement('textarea');
+  textarea.style = 'width:100%;height:80px;border:none;background:transparent;resize:none;outline:none;font-size:15px;flex:1;';
+  textarea.value = localStorage.getItem('floaty_note_content') || '';
+  textarea.oninput = function() {
+    localStorage.setItem('floaty_note_content', textarea.value);
+    window.opener && window.opener.postMessage({type:'floaty_note_update', value:textarea.value}, '*');
+  };
+  noteWin.appendChild(textarea);
+  // 关闭按钮
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '关闭';
+  closeBtn.style = 'margin-top:10px;align-self:flex-end;';
+  closeBtn.onclick = function(){ window.close(); };
+  noteWin.appendChild(closeBtn);
+  document.body.appendChild(noteWin);
+  // 监听主窗口同步
+  window.addEventListener('storage', function(e){
+    if(e.key==='floaty_note_content') textarea.value = e.newValue||'';
+  });
+  // 接收主窗口消息
+  window.addEventListener('message', function(e){
+    if(e.data && e.data.type==='floaty_note_update') textarea.value = e.data.value;
+  });
+  textarea.focus();
+} else {
+  // 主窗口同步逻辑
+  window.addEventListener('message', function(e){
+    if(e.data && e.data.type==='floaty_note_update') {
+      const textarea = document.querySelector('#floaty-note textarea');
+      if(textarea) textarea.value = e.data.value;
+    }
+  });
+  const textarea = document.querySelector('#floaty-note textarea');
+  if(textarea){
     textarea.value = localStorage.getItem('floaty_note_content') || '';
-    textarea.oninput = function() {
+    textarea.oninput = function(){
       localStorage.setItem('floaty_note_content', textarea.value);
-      window.opener && window.opener.postMessage({type:'floaty_note_update', value:textarea.value}, '*');
+      // 通知所有便签窗口
+      for(let w of window.openedNotes||[]) try{w.postMessage({type:'floaty_note_update', value:textarea.value}, '*');}catch(e){}
     };
-    noteWin.appendChild(textarea);
-    // 关闭按钮
-    const closeBtn = document.createElement('button');
-    closeBtn.textContent = '关闭';
-    closeBtn.style = 'margin-top:10px;align-self:flex-end;';
-    closeBtn.onclick = function(){ window.close(); };
-    noteWin.appendChild(closeBtn);
-    document.body.appendChild(noteWin);
-    // 监听主窗口同步
-    window.addEventListener('storage', function(e){
-      if(e.key==='floaty_note_content') textarea.value = e.newValue||'';
-    });
-    // 接收主窗口消息
-    window.addEventListener('message', function(e){
-      if(e.data && e.data.type==='floaty_note_update') textarea.value = e.data.value;
-    });
-    textarea.focus();
-  } else {
-    // 主窗口同步逻辑
-    window.addEventListener('message', function(e){
-      if(e.data && e.data.type==='floaty_note_update') {
-        const textarea = document.querySelector('#floaty-note textarea');
-        if(textarea) textarea.value = e.data.value;
+  }
+}
+
+// 用户头像显示逻辑
+const navbarMenu = document.querySelector('.navbar-menu');
+if (navbarMenu) {
+  let avatar = navbarMenu.querySelector('#user-avatar');
+  if (!avatar) {
+    avatar = document.createElement('div');
+    avatar.id = 'user-avatar';
+    avatar.style = 'margin-left:16px;display:flex;align-items:center;';
+    navbarMenu.appendChild(avatar);
+  }
+  const loginBtn = navbarMenu.querySelector('a[href="/login.html"]');
+  const registerBtn = navbarMenu.querySelector('a[href="/register.html"]');
+  
+  // 确保 authStateListener 已定义
+  if (typeof authStateListener === 'function') {
+    authStateListener(user => {
+      if (user) {
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (registerBtn) registerBtn.style.display = 'none';
+        let url = user.photoURL;
+        let name = user.displayName || user.email || '';
+        avatar.innerHTML = '';
+        if (url) {
+          avatar.innerHTML = `<img src="${url}" alt="头像" style="width:32px;height:32px;border-radius:50%;object-fit:cover;box-shadow:0 1px 4px #0002;">`;
+        } else {
+          let letter = name.trim()[0] ? name.trim()[0].toUpperCase() : '?';
+          avatar.innerHTML = `<div style="width:32px;height:32px;border-radius:50%;background:#FFD166;color:#2D3748;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:1.1rem;box-shadow:0 1px 4px #0002;">${letter}</div>`;
+        }
+        avatar.style.display = 'flex';
+      } else {
+        if (loginBtn) loginBtn.style.display = '';
+        if (registerBtn) registerBtn.style.display = '';
+        avatar.innerHTML = '';
+        avatar.style.display = 'none';
       }
     });
-    const textarea = document.querySelector('#floaty-note textarea');
-    if(textarea){
-      textarea.value = localStorage.getItem('floaty_note_content') || '';
-      textarea.oninput = function(){
-        localStorage.setItem('floaty_note_content', textarea.value);
-        // 通知所有便签窗口
-        for(let w of window.openedNotes||[]) try{w.postMessage({type:'floaty_note_update', value:textarea.value}, '*');}catch(e){}
-      };
-    }
+  } else {
+    console.warn('authStateListener 未定义，跳过用户头像逻辑');
+    // 默认显示登录和注册按钮
+    if (loginBtn) loginBtn.style.display = '';
+    if (registerBtn) registerBtn.style.display = '';
+    avatar.style.display = 'none';
   }
-}); 
+} 
