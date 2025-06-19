@@ -1,8 +1,10 @@
 {
   "version": 2,
-  "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
-  ],
-  "cleanUrls": true,
-  "trailingSlash": false
+  "routes": [
+    { "handle": "filesystem" },
+    { "src": "/(.*)\\.html", "dest": "/$1" },
+    { "src": "/(.*)/", "dest": "/$1" },
+    { "src": "/.*", "status": 404, "dest": "/404.html" },
+    { "src": "/(.*)", "dest": "/index.html" }
+  ]
 } 
