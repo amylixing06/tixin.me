@@ -1,27 +1,27 @@
 const CACHE_NAME = 'flowtips-cache-v3';
 const CACHE_FILES = [
-  '/',
-  '/index.html',
-  '/floaty.js',
-  '/firebase.js',
-  '/index.js',
-  '/manifest.json',
-  '/privacy.html',
-  '/terms.html',
-  '/cache.html',
-  '/wechat-qr.jpg',
-  '/octopus.png',
-  '/favicon.ico', // 根目录下的favicon
+  './',
+  'index.html',
+  'floaty.js',
+  'firebase.js',
+  'index.js',
+  'manifest.json',
+  'privacy.html',
+  'terms.html',
+  'cache.html',
+  'wechat-qr.jpg',
+  'octopus.png',
+  'favicon.ico' // 根目录下的favicon
 ];
 
 // 不存在但可能被请求的旧文件列表
 const REMOVED_FILES = [
-  '/login.html',
-  '/login.js',
-  '/register.html',
-  '/register.js',
-  '/login',
-  '/register'
+  'login.html',
+  'login.js',
+  'register.html',
+  'register.js',
+  'login',
+  'register'
 ];
 
 self.addEventListener('install', event => {
