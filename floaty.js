@@ -429,7 +429,7 @@ function mergeNotes(localNotes, cloudNotes) {
             <div class="note-time" style="font-size:12px;color:#666;text-align:left;">
               ${new Date(note.updatedAt || Date.now()).toLocaleString()}
             </div>
-            <button class="edit-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">✏️</button>
+            <button class="edit-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">🖋️</button>
           </div>
         </div>
       `;
@@ -556,6 +556,12 @@ function mergeNotes(localNotes, cloudNotes) {
     textarea.style.background = 'transparent';
     textarea.focus();
     
+    // 显示内容区透明背景
+    const contentOverlay = document.getElementById('content-overlay');
+    if (contentOverlay) {
+      contentOverlay.style.display = 'block';
+    }
+    
     // 颜色选择区
     let colorPicker = document.getElementById('color-picker');
     if (colorPicker) {
@@ -571,32 +577,6 @@ function mergeNotes(localNotes, cloudNotes) {
         };
         colorPicker.appendChild(colorDot);
       });
-    }
-    
-    // 保存按钮
-    let saveBtn = document.getElementById('save-note-btn');
-    if (saveBtn) {
-      saveBtn.textContent = editingId ? '更新' : '保存';
-      saveBtn.onclick = function() {
-        const val = textarea.value;
-        const color = note.style.background;
-        
-        if (val && val.trim()) {
-          if (!note._editingId) {
-            // 新建便签
-            saveNoteData(val, color || COLORS[1]);
-          } else {
-            // 更新已有便签
-            saveNoteData(val, color || COLORS[1], note._editingId);
-          }
-          
-          // 隐藏便签
-          note.style.display = 'none';
-          
-          // 显示保存成功提示
-          alert(editingId ? '便签已更新' : '便签已保存');
-        }
-      };
     }
     
     // 使用防抖函数，避免频繁创建便签
@@ -619,6 +599,18 @@ function mergeNotes(localNotes, cloudNotes) {
         }
       }, 1000);
     };
+    
+    // 添加关闭按钮事件，隐藏内容区透明背景
+    const closeBtn = document.getElementById('close-note-btn');
+    if (closeBtn) {
+      closeBtn.onclick = function() {
+        note.style.display = 'none';
+        // 隐藏内容区透明背景
+        if (contentOverlay) {
+          contentOverlay.style.display = 'none';
+        }
+      };
+    }
   }
 
   if (btn) {
@@ -671,14 +663,13 @@ function mergeNotes(localNotes, cloudNotes) {
           // 使用新建时生成的ID或编辑时的ID
           let tempNoteId = newNoteId;
           
-          // 颜色选择区和保存按钮
+          // 颜色选择区
           const btnRow = doc.createElement('div');
           btnRow.style = 'display:flex;align-items:center;justify-content:center;gap:16px;min-height:32px;box-sizing:border-box;width:100%;margin:0 0 8px 0;padding:0;border:none;';
           const colorWrap = doc.createElement('div');
           colorWrap.style = 'display:flex;justify-content:center;gap:16px;align-items:center;margin-top:8px;margin-bottom:8px;width:100%';
           
-          // 禁用自动保存，改为手动保存
-          // 可以添加防抖函数实现输入停止后自动保存
+          // 设置自动保存功能
           let saveTimeout;
           textarea.oninput = function() {
             // 清除之前的定时器

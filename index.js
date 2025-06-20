@@ -29,17 +29,30 @@ function setupMobileNewNoteBtn() {
   const btnElement = mobileBtn.querySelector('button');
   if (btnElement) {
     btnElement.onclick = function() {
-      // 调用隐藏按钮的点击事件
-      const newBtn = document.getElementById('new-note-btn');
-      if (newBtn && typeof newBtn.onclick === 'function') {
-        newBtn.onclick();
+      console.log('底部新建便签按钮被点击');
+      
+      // 优先使用画中画窗口（全局悬浮便签）
+      if ('documentPictureInPicture' in window && window.openFloatyNote) {
+        console.log('使用画中画窗口创建便签');
+        window.openFloatyNote('');
+        return;
+      }
+      
+      // 如果不支持画中画，检查内联便签容器是否存在
+      const floatyNote = document.getElementById('floaty-note');
+      if (!floatyNote) {
+        console.error('内联便签容器不存在，无法创建内联便签');
+        alert('创建便签失败：缺少必要的DOM元素');
+        return;
+      }
+      
+      // 使用内联便签
+      if (window.showInlineNote) {
+        console.log('使用内联便签');
+        window.showInlineNote('');
       } else {
-        // 如果找不到隐藏按钮或没有点击事件，直接尝试调用floaty.js中的函数
-        if (window.openFloatyNote) {
-          window.openFloatyNote('');
-        } else if (window.showInlineNote) {
-          window.showInlineNote('');
-        }
+        console.error('无法找到创建便签的函数');
+        alert('创建便签失败：无法找到创建函数');
       }
     };
   }
