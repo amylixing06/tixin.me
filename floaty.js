@@ -1,6 +1,12 @@
 // 尝试导入 authStateListener，如果失败则使用空函数
 let authStateListener = (callback) => { callback(null); };
 let currentUser = null;
+// 添加同步状态变量
+let isSyncing = false;
+let lastSyncTime = null;
+let lastSyncStatus = null;
+// 添加最大重试次数常量
+const MAX_SYNC_ATTEMPTS = 3;
 
 // 尝试导入 firebase.js
 import('./firebase.js').then(module => {
@@ -51,9 +57,13 @@ function saveNotes(notes) {
 
 // 同步便签到云端
 async function syncNotesToCloud(notes) {
-  if (!currentUser || !window.firebaseDB) return;
+  // 如果没有登录或者没有Firebase，或者正在同步中，则不执行
+  if (!currentUser || !window.firebaseDB || isSyncing) return;
   
   try {
+    // 设置同步状态
+    isSyncing = true;
+    updateSyncStatus('syncing');
     console.log('开始同步便签到云端...');
     
     // 获取当前时间戳
@@ -66,13 +76,128 @@ async function syncNotesToCloud(notes) {
     };
     
     // 调用Firebase同步函数
-    await window.firebaseDB.syncNotesToCloud(currentUser.uid, notesData);
+    const result = await window.firebaseDB.syncNotesToCloud(currentUser.uid, notesData);
     
-    console.log('便签已同步到云端');
+    if (result && result.success) {
+      // 更新同步状态
+      lastSyncTime = new Date();
+      lastSyncStatus = 'success';
+      updateSyncStatus('success');
+      console.log('便签已同步到云端');
+    } else if (result && !result.success) {
+      // 处理同步失败情况
+      console.error('同步便签到云端失败:', result.error);
+      lastSyncStatus = 'error';
+      
+      // 如果是离线状态，显示特殊提示
+      if (result.offline) {
+        updateSyncStatus('error', '网络连接已断开，将在网络恢复后自动重试');
+        
+        // 添加网络恢复事件监听
+        window.addEventListener('online', function onlineHandler() {
+          console.log('网络已恢复，尝试重新同步');
+          window.removeEventListener('online', onlineHandler);
+          setTimeout(() => {
+            isSyncing = false;
+            syncNotesToCloud(notes);
+          }, 2000);
+        });
+      } else if (result.shouldRetry) {
+        // 如果需要重试
+        updateSyncStatus('error', `同步失败 (${result.attempt}/${MAX_SYNC_ATTEMPTS}): ${result.error}`);
+        
+        // 添加指数退避重试
+        const retryDelay = Math.min(1000 * Math.pow(2, result.attempt), 30000);
+        setTimeout(() => {
+          isSyncing = false;
+          console.log(`第 ${result.attempt} 次重试同步，延迟 ${retryDelay}ms`);
+          syncNotesToCloud(notes);
+        }, retryDelay);
+      } else {
+        // 其他错误情况
+        updateSyncStatus('error', result.error || '同步失败');
+      }
+      return;
+    }
   } catch (error) {
     console.error('同步便签到云端失败:', error);
+    // 更新同步状态
+    lastSyncStatus = 'error';
+    updateSyncStatus('error', error.message);
+    
+    // 添加重试逻辑
+    setTimeout(() => {
+      isSyncing = false; // 重置同步状态，允许下次尝试
+      if (currentUser && window.firebaseDB) {
+        console.log('尝试重新同步...');
+        syncNotesToCloud(notes);
+      }
+    }, 5000); // 5秒后重试
+    return;
+  } finally {
+    // 确保同步状态被重置
+    setTimeout(() => {
+      isSyncing = false;
+    }, 1000);
   }
 }
+
+// 更新同步状态指示器
+function updateSyncStatus(status, errorMsg) {
+  // 查找或创建同步状态指示器
+  let syncIndicator = document.getElementById('sync-status-indicator');
+  if (!syncIndicator) {
+    syncIndicator = document.createElement('div');
+    syncIndicator.id = 'sync-status-indicator';
+    syncIndicator.style = 'position:fixed;bottom:70px;right:20px;padding:8px 12px;border-radius:4px;font-size:12px;z-index:100;transition:opacity 0.5s;box-shadow:0 2px 8px rgba(0,0,0,0.15);';
+    document.body.appendChild(syncIndicator);
+  }
+  
+  // 根据状态更新显示
+  switch (status) {
+    case 'syncing':
+      syncIndicator.style.background = '#f0f9ff';
+      syncIndicator.style.color = '#0369a1';
+      syncIndicator.style.border = '1px solid #bae6fd';
+      syncIndicator.innerHTML = '正在同步数据...';
+      syncIndicator.style.display = 'block';
+      syncIndicator.style.opacity = '1';
+      break;
+    case 'success':
+      syncIndicator.style.background = '#f0fdf4';
+      syncIndicator.style.color = '#166534';
+      syncIndicator.style.border = '1px solid #bbf7d0';
+      syncIndicator.innerHTML = `同步成功 <span style="font-size:10px;opacity:0.8;">${lastSyncTime.toLocaleTimeString()}</span>`;
+      syncIndicator.style.display = 'block';
+      syncIndicator.style.opacity = '1';
+      // 3秒后淡出
+      setTimeout(() => {
+        syncIndicator.style.opacity = '0';
+        setTimeout(() => {
+          syncIndicator.style.display = 'none';
+        }, 500);
+      }, 3000);
+      break;
+    case 'error':
+      syncIndicator.style.background = '#fef2f2';
+      syncIndicator.style.color = '#b91c1c';
+      syncIndicator.style.border = '1px solid #fecaca';
+      syncIndicator.innerHTML = `同步失败: ${errorMsg || '网络错误'} <span style="margin-left:5px;cursor:pointer;text-decoration:underline;" onclick="retrySync()">重试</span>`;
+      syncIndicator.style.display = 'block';
+      syncIndicator.style.opacity = '1';
+      break;
+    default:
+      syncIndicator.style.display = 'none';
+  }
+}
+
+// 重试同步函数
+window.retrySync = function() {
+  if (!isSyncing && currentUser && window.firebaseDB) {
+    const notes = getNotes();
+    syncNotesToCloud(notes);
+  }
+};
 
 // 从云端加载便签
 async function loadNotesFromCloud() {
@@ -80,6 +205,7 @@ async function loadNotesFromCloud() {
   
   try {
     console.log('正在从云端加载便签...');
+    updateSyncStatus('syncing');
     
     // 调用Firebase加载函数
     const result = await window.firebaseDB.loadNotesFromCloud(currentUser.uid);
@@ -105,14 +231,26 @@ async function loadNotesFromCloud() {
       // 更新便签列表
       updateAllNotes();
       
+      // 更新同步状态
+      lastSyncTime = new Date();
+      lastSyncStatus = 'success';
+      updateSyncStatus('success');
+      
       return true;
     } else {
       console.log('云端没有便签数据或加载失败');
+      updateSyncStatus('success');
       return false;
     }
   } catch (error) {
     console.error('从云端加载便签失败:', error);
+    updateSyncStatus('error', error.message);
     return false;
+  } finally {
+    // 确保同步状态被重置
+    setTimeout(() => {
+      isSyncing = false;
+    }, 1000);
   }
 }
 
@@ -285,11 +423,13 @@ function mergeNotes(localNotes, cloudNotes) {
         <div class="note-item" data-id="${note.id}" style="background:${note.color || COLORS[0]};margin-bottom:15px;padding:12px 16px;border-radius:8px;position:relative;">
           <div class="note-content" style="word-break:break-all;margin-right:25px;">${note.content || ''}</div>
           <div class="note-actions" style="position:absolute;top:8px;right:8px;">
-            <button class="edit-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;margin-right:4px;">✏️</button>
             <button class="delete-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">❌</button>
           </div>
-          <div class="note-time" style="font-size:12px;color:#666;margin-top:8px;text-align:right;">
-            ${new Date(note.updatedAt || Date.now()).toLocaleString()}
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
+            <div class="note-time" style="font-size:12px;color:#666;text-align:left;">
+              ${new Date(note.updatedAt || Date.now()).toLocaleString()}
+            </div>
+            <button class="edit-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">✏️</button>
           </div>
         </div>
       `;
@@ -341,7 +481,30 @@ function mergeNotes(localNotes, cloudNotes) {
     });
     
     // 显示云同步状态（仅未登录时显示）
-    if (!currentUser) {
+    const existingSyncStatus = notesList.querySelector('#sync-status');
+    if (existingSyncStatus) {
+      existingSyncStatus.remove();
+    }
+    
+    // 检查用户是否已登录
+    let userLoggedIn = currentUser;
+    
+    // 如果currentUser为空，尝试从sessionStorage或localStorage获取
+    if (!userLoggedIn) {
+      const sessionUser = sessionStorage.getItem('currentUser');
+      const localUser = localStorage.getItem('currentUser');
+      
+      if (sessionUser || localUser) {
+        try {
+          // 尝试解析JSON数据
+          userLoggedIn = sessionUser ? JSON.parse(sessionUser) : (localUser ? JSON.parse(localUser) : null);
+        } catch (e) {
+          console.error('解析用户信息失败:', e);
+        }
+      }
+    }
+    
+    if (!userLoggedIn) {
       const syncStatus = document.createElement('div');
       syncStatus.style = 'text-align:center;margin-top:20px;font-size:12px;color:#666;';
       syncStatus.id = 'sync-status';
@@ -512,56 +675,7 @@ function mergeNotes(localNotes, cloudNotes) {
           const btnRow = doc.createElement('div');
           btnRow.style = 'display:flex;align-items:center;justify-content:center;gap:16px;min-height:32px;box-sizing:border-box;width:100%;margin:0 0 8px 0;padding:0;border:none;';
           const colorWrap = doc.createElement('div');
-          colorWrap.style = 'display:flex;justify-content:center;gap:16px;align-items:center;margin-top:8px;margin-bottom:8px;width:80%';
-          
-          // 添加保存按钮
-          const saveBtn = doc.createElement('button');
-          saveBtn.textContent = editingId ? '更新' : '保存';
-          saveBtn.style = 'padding:4px 10px;background:#2D3748;color:#FFD166;border:none;border-radius:4px;cursor:pointer;font-size:12px;';
-          saveBtn.onclick = function() {
-            const content = textarea.value;
-            const color = noteContainer.style.background;
-            
-            if (content && content.trim()) {
-              // 检查这个ID是否已存在于便签列表中
-              let notes = getNotes();
-              const existingNoteIndex = notes.findIndex(n => n.id === tempNoteId);
-              
-              if (existingNoteIndex === -1) {
-                // 新便签，不存在，则添加
-                const newNote = {
-                  id: tempNoteId,
-                  content: content,
-                  color: color,
-                  createdAt: Date.now(),
-                  updatedAt: Date.now()
-                };
-                notes.unshift(newNote);
-                console.log('创建了新便签，ID:', tempNoteId);
-              } else {
-                // 已存在，则更新
-                notes[existingNoteIndex] = {
-                  ...notes[existingNoteIndex],
-                  content: content,
-                  color: color,
-                  updatedAt: Date.now()
-                };
-                console.log('更新便签，ID:', tempNoteId);
-              }
-              
-              saveNotes(notes);
-              
-              // 更新主页面上的便签显示
-              updateAllNotes();
-              
-              // 显示保存成功提示
-              const tip = doc.createElement('div');
-              tip.textContent = existingNoteIndex !== -1 ? '更新成功' : '保存成功';
-              tip.style = 'position:absolute;top:10px;right:10px;background:rgba(0,0,0,0.7);color:white;padding:4px 8px;border-radius:4px;font-size:12px;';
-              noteContainer.appendChild(tip);
-              setTimeout(() => tip.remove(), 2000);
-            }
-          };
+          colorWrap.style = 'display:flex;justify-content:center;gap:16px;align-items:center;margin-top:8px;margin-bottom:8px;width:100%';
           
           // 禁用自动保存，改为手动保存
           // 可以添加防抖函数实现输入停止后自动保存
@@ -606,8 +720,15 @@ function mergeNotes(localNotes, cloudNotes) {
                 
                 // 更新主页面上的便签显示
                 updateAllNotes();
+                
+                // 显示自动保存提示
+                const autoSaveTip = doc.createElement('div');
+                autoSaveTip.textContent = '已保存';
+                autoSaveTip.style = 'position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.7);color:white;padding:4px 8px;border-radius:4px;font-size:14px;font-weight:bold;';
+                noteContainer.appendChild(autoSaveTip);
+                setTimeout(() => autoSaveTip.remove(), 2000);
               }
-            }, 1000); // 1秒后自动保存
+            }, 1000);
           };
           
           const colorNames = ['白色','淡黄','粉红','淡蓝'];
@@ -638,11 +759,54 @@ function mergeNotes(localNotes, cloudNotes) {
               colorDot.style.border = '2.5px solid #333';
               colorDot.style.boxShadow = '0 0 0 4px rgba(165,201,202,0.15)';
               colorDot.style.transform = 'scale(1.15)';
+              
+              // 立即保存颜色变更
+              const content = textarea.value;
+              const color = noteContainer.style.background;
+              
+              if (content && content.trim()) {
+                // 检查这个ID是否已存在于便签列表中
+                let notes = getNotes();
+                const existingNoteIndex = notes.findIndex(n => n.id === tempNoteId);
+                
+                if (existingNoteIndex === -1) {
+                  // 新便签，不存在，则添加
+                  const newNote = {
+                    id: tempNoteId,
+                    content: content,
+                    color: color,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                  };
+                  notes.unshift(newNote);
+                  console.log('颜色变更，创建了新便签，ID:', tempNoteId);
+                } else {
+                  // 已存在，则更新
+                  notes[existingNoteIndex] = {
+                    ...notes[existingNoteIndex],
+                    content: content,
+                    color: color,
+                    updatedAt: Date.now()
+                  };
+                  console.log('颜色变更，更新便签，ID:', tempNoteId);
+                }
+                
+                saveNotes(notes);
+                
+                // 更新主页面上的便签显示
+                updateAllNotes();
+                
+                // 显示颜色已更新提示
+                const colorChangeTip = doc.createElement('div');
+                colorChangeTip.textContent = '已保存';
+                colorChangeTip.style = 'position:absolute;bottom:10px;left:10px;background:rgba(0,0,0,0.7);color:white;padding:4px 8px;border-radius:4px;font-size:14px;font-weight:bold;';
+                noteContainer.appendChild(colorChangeTip);
+                setTimeout(() => colorChangeTip.remove(), 2000);
+              }
             };
             colorWrap.appendChild(colorDot);
           });
           btnRow.appendChild(colorWrap);
-          btnRow.appendChild(saveBtn);
           noteContainer.appendChild(btnRow);
           
           // 动态分配高度和限制最小宽高
@@ -676,6 +840,72 @@ function mergeNotes(localNotes, cloudNotes) {
   window.showInlineNote = showInlineNote;
   
   console.log('便签功能初始化完成');
+  
+  // 添加自动同步功能，确保数据定期同步到云端
+  function setupAutoSync() {
+    // 检查是否已登录
+    if (!currentUser) return;
+    
+    console.log('设置自动同步功能');
+    
+    // 定期同步（每5分钟）
+    const syncInterval = setInterval(() => {
+      if (currentUser && !isSyncing) {
+        console.log('执行定期自动同步...');
+        const notes = getNotes();
+        if (notes && notes.length > 0) {
+          syncNotesToCloud(notes);
+        }
+      }
+    }, 5 * 60 * 1000);
+    
+    // 页面关闭前同步
+    window.addEventListener('beforeunload', () => {
+      if (currentUser && !isSyncing) {
+        console.log('页面关闭前同步数据...');
+        const notes = getNotes();
+        if (notes && notes.length > 0) {
+          // 使用同步方式发送请求，确保在页面关闭前完成
+          navigator.sendBeacon(
+            'https://tixinme.firebaseio.com/user_notes/' + currentUser.uid + '.json',
+            JSON.stringify({ notes: notes, updatedAt: Date.now() })
+          );
+        }
+      }
+    });
+    
+    // 网络状态变化时同步
+    window.addEventListener('online', () => {
+      console.log('网络已恢复，执行自动同步...');
+      if (currentUser && !isSyncing) {
+        setTimeout(() => {
+          const notes = getNotes();
+          if (notes && notes.length > 0) {
+            syncNotesToCloud(notes);
+          }
+        }, 2000);
+      }
+    });
+    
+    return syncInterval;
+  }
+  
+  // 启动自动同步
+  let autoSyncInterval;
+  
+  // 监听用户状态变化
+  authStateListener(user => {
+    // 清除之前的同步间隔
+    if (autoSyncInterval) {
+      clearInterval(autoSyncInterval);
+      autoSyncInterval = null;
+    }
+    
+    // 如果用户已登录，设置自动同步
+    if (user) {
+      autoSyncInterval = setupAutoSync();
+    }
+  });
 })();
 
 // 判断是否为便签窗口
@@ -733,11 +963,20 @@ if (navbarMenu) {
   if (!avatar) {
     avatar = document.createElement('div');
     avatar.id = 'user-avatar';
-    avatar.style = 'margin-left:16px;display:flex;align-items:center;';
+    avatar.style = 'margin-left:16px;display:flex;align-items:center;position:relative;cursor:pointer;';
     navbarMenu.appendChild(avatar);
   }
   const loginBtn = navbarMenu.querySelector('a[href="/login.html"]');
   const registerBtn = navbarMenu.querySelector('a[href="/register.html"]');
+  
+  // 创建用户下拉菜单
+  let userDropdown = document.getElementById('user-dropdown');
+  if (!userDropdown) {
+    userDropdown = document.createElement('div');
+    userDropdown.id = 'user-dropdown';
+    userDropdown.style = 'position:absolute;top:100%;right:0;background:white;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.2);min-width:200px;z-index:1000;display:none;margin-top:8px;overflow:hidden;';
+    avatar.appendChild(userDropdown);
+  }
   
   // 确保 authStateListener 已定义
   if (typeof authStateListener === 'function') {
@@ -755,6 +994,58 @@ if (navbarMenu) {
           avatar.innerHTML = `<div style="width:32px;height:32px;border-radius:50%;background:#FFD166;color:#2D3748;display:flex;align-items:center;justify-content:center;font-weight:bold;font-size:1.1rem;box-shadow:0 1px 4px #0002;">${letter}</div>`;
         }
         avatar.style.display = 'flex';
+        
+        // 重新创建下拉菜单
+        userDropdown = document.createElement('div');
+        userDropdown.id = 'user-dropdown';
+        userDropdown.style = 'position:absolute;top:100%;right:0;background:white;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.2);min-width:200px;z-index:1000;display:none;margin-top:8px;overflow:hidden;';
+        
+        // 添加用户信息
+        const userInfo = document.createElement('div');
+        userInfo.style = 'padding:16px;border-bottom:1px solid #eee;';
+        userInfo.innerHTML = `
+          <div style="font-weight:bold;margin-bottom:4px;color:#333;">${user.displayName || '用户'}</div>
+          <div style="font-size:12px;color:#666;word-break:break-all;">${user.email}</div>
+        `;
+        userDropdown.appendChild(userInfo);
+        
+        // 添加退出按钮
+        const logoutBtn = document.createElement('div');
+        logoutBtn.style = 'padding:12px 16px;cursor:pointer;color:#333;transition:background 0.2s;';
+        logoutBtn.innerHTML = '退出登录';
+        logoutBtn.onmouseover = function() { this.style.background = '#f5f5f5'; };
+        logoutBtn.onmouseout = function() { this.style.background = 'transparent'; };
+        logoutBtn.onclick = function() {
+          if (window.firebaseAuth && window.firebaseAuth.logOut) {
+            window.firebaseAuth.logOut()
+              .then(() => {
+                console.log('用户已退出登录');
+                // 隐藏下拉菜单
+                userDropdown.style.display = 'none';
+              })
+              .catch(error => {
+                console.error('退出登录失败:', error);
+                alert('退出登录失败: ' + error.message);
+              });
+          } else {
+            console.error('未找到退出登录方法');
+            alert('退出登录功能暂不可用');
+          }
+        };
+        userDropdown.appendChild(logoutBtn);
+        
+        avatar.appendChild(userDropdown);
+        
+        // 点击头像显示/隐藏下拉菜单
+        avatar.onclick = function(e) {
+          e.stopPropagation();
+          userDropdown.style.display = userDropdown.style.display === 'none' ? 'block' : 'none';
+        };
+        
+        // 点击其他地方关闭下拉菜单
+        document.addEventListener('click', function() {
+          if (userDropdown) userDropdown.style.display = 'none';
+        });
       } else {
         if (loginBtn) loginBtn.style.display = '';
         if (registerBtn) registerBtn.style.display = '';

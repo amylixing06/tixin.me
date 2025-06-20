@@ -223,7 +223,7 @@
 		}
 		/* 调整页面内容，避免被导航栏和页脚遮挡 */
 		.page-content {
-		  padding-top: 80px;
+		  padding-top: 40px;
 		  padding-bottom: 60px;
 		  width: 100%;
 		  display: flex;
@@ -316,6 +316,10 @@
 		  text-decoration: underline;
 		  margin: 0 4px;
 		}
+		@keyframes spin {
+			0% { transform: rotate(0deg); }
+			100% { transform: rotate(360deg); }
+		}
 		</style>
 	</head>
 	<body style="margin:0;padding:0;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;background:#f6f6f6;position:relative;">
@@ -326,8 +330,14 @@
 				<span class="navbar-logo-text">提醒我</span>
 			</a>
 			<div class="navbar-menu">
-				<a href="javascript:void(0)" onclick="showLoginModal()">登录</a>
-				<a href="javascript:void(0)" onclick="showRegisterModal()">注册</a>
+				<!-- 默认隐藏登录注册按钮，等待用户状态确认 -->
+				<a href="javascript:void(0)" onclick="showLoginModal()" style="display:none;">登录</a>
+				<a href="javascript:void(0)" onclick="showRegisterModal()" style="display:none;">注册</a>
+				<!-- 添加加载中状态显示 -->
+				<div id="auth-loading" style="display:flex;align-items:center;">
+					<div style="width:24px;height:24px;border:2px solid #FFD166;border-radius:50%;border-top-color:transparent;animation:spin 1s linear infinite;"></div>
+					<span style="margin-left:8px;color:#fff;font-size:0.9rem;">加载中...</span>
+				</div>
 			</div>
 		</nav>
 
@@ -373,13 +383,13 @@
 		</div>
 
 		<!-- 内联便签容器 -->
-		<div id="floaty-note" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);width:90%;max-width:400px;height:400px;background:#fffbe6;border-radius:10px;box-shadow:0 5px 20px rgba(0,0,0,0.2);z-index:2000;padding:20px;box-sizing:border-box;flex-direction:column;">
-			<textarea id="plain-editor" style="width:100%;height:calc(100% - 40px);border:none;background:transparent;resize:none;outline:none;font-size:1rem;line-height:1.5;margin-bottom:10px;padding:0;"></textarea>
-			<div style="display:flex;justify-content:space-between;align-items:center;">
-				<div id="color-picker" style="display:flex;gap:10px;"></div>
-				<button id="save-note-btn" style="padding:6px 12px;background:#2D3748;color:#FFD166;border:none;border-radius:4px;cursor:pointer;">保存</button>
+		<div id="floaty-note" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:80%;max-width:400px;height:300px;background:#fffbe6;border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.2);z-index:1000;flex-direction:column;padding:16px;box-sizing:border-box;">
+			<textarea id="plain-editor" style="width:100%;height:calc(100% - 60px);border:none;background:transparent;resize:none;outline:none;font-size:14px;"></textarea>
+			<div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+				<div id="color-picker" style="display:flex;gap:6px;justify-content:center;flex:1;"></div>
 				<button id="close-note-btn" style="padding:6px 12px;background:#ccc;color:#333;border:none;border-radius:4px;cursor:pointer;" onclick="document.getElementById('floaty-note').style.display='none';">关闭</button>
 			</div>
+			<!-- 自动保存提示将在JavaScript中动态添加 -->
 		</div>
 
 		<!-- 页脚 -->
@@ -464,6 +474,8 @@
 			</div>
 		</div>
 
+		<div id="sync-status-indicator" style="display:none;margin:10px 0;padding:8px;border-radius:4px;background:#f5f5f5;text-align:center;"></div>
+
 		<script type="module">
 			// 导入Firebase身份验证功能
 			import { authStateListener } from './firebase.js';
@@ -485,6 +497,56 @@
 			window.closeRegisterModal = function() {
 				document.getElementById('register-modal').style.display = 'none';
 			}
+			
+			// 立即检查sessionStorage中的用户信息
+			function checkSessionStorageUser() {
+				const storedUser = sessionStorage.getItem('currentUser');
+				if (storedUser) {
+					try {
+						const userInfo = JSON.parse(storedUser);
+						console.log('从sessionStorage立即恢复用户信息:', userInfo);
+						updateUserInterface(userInfo);
+						return true;
+					} catch (e) {
+						console.error('解析sessionStorage中的用户信息失败:', e);
+					}
+				} else {
+					// 如果没有sessionStorage，检查localStorage
+					const localUser = localStorage.getItem('currentUser');
+					if (localUser) {
+						try {
+							const userInfo = JSON.parse(localUser);
+							console.log('从localStorage立即恢复用户信息:', userInfo);
+							// 同步到sessionStorage
+							sessionStorage.setItem('currentUser', localUser);
+							updateUserInterface(userInfo);
+							return true;
+						} catch (e) {
+							console.error('解析localStorage中的用户信息失败:', e);
+						}
+					}
+				}
+				return false;
+			}
+			
+			// 页面加载后立即执行，不等待DOMContentLoaded
+			// 使用setTimeout确保DOM已经加载了基本元素
+			setTimeout(function() {
+				// 如果没有找到用户信息，显示登录注册按钮
+				if (!checkSessionStorageUser()) {
+					// 隐藏加载指示器
+					const authLoading = document.getElementById('auth-loading');
+					if (authLoading) {
+						authLoading.style.display = 'none';
+					}
+					
+					// 显示登录注册按钮
+					const loginBtn = document.querySelector('.navbar-menu a[onclick="showLoginModal()"]');
+					const registerBtn = document.querySelector('.navbar-menu a[onclick="showRegisterModal()"]');
+					if (loginBtn) loginBtn.style.display = '';
+					if (registerBtn) registerBtn.style.display = '';
+				}
+			}, 10);
 			
 			// 等待Firebase初始化完成
 			function waitForFirebase() {
@@ -657,6 +719,12 @@
 				const loginBtn = document.querySelector('.navbar-menu a[onclick="showLoginModal()"]');
 				const registerBtn = document.querySelector('.navbar-menu a[onclick="showRegisterModal()"]');
 				const termsFooter = document.getElementById('terms-footer');
+				const authLoading = document.getElementById('auth-loading');
+				
+				// 隐藏加载指示器
+				if (authLoading) {
+					authLoading.style.display = 'none';
+				}
 				
 				if (user) {
 					console.log('用户已登录:', user.email);
@@ -670,11 +738,19 @@
 					// 添加用户头像和退出按钮
 					let userMenu = document.querySelector('.navbar-menu .user-menu');
 					if (!userMenu) {
+						// 确保导航栏菜单不会限制下拉菜单显示
+						const navbarMenu = document.querySelector('.navbar-menu');
+						if (navbarMenu) {
+							// 修改导航栏菜单样式，确保不会限制子元素溢出
+							navbarMenu.style.overflow = 'visible';
+						}
+						
 						userMenu = document.createElement('div');
 						userMenu.className = 'user-menu';
-						userMenu.style = 'display:flex;align-items:center;gap:10px;';
+						userMenu.style = 'position:relative;display:inline-block;';
 						
 						const userAvatar = document.createElement('div');
+						userAvatar.style = 'cursor:pointer;';
 						
 						// 检查用户是否有头像URL（谷歌登录）
 						if (user.photoURL) {
@@ -682,20 +758,48 @@
 							userAvatar.innerHTML = `<img src="${user.photoURL}" alt="${user.displayName || user.email}" style="width:32px;height:32px;border-radius:50%;object-fit:cover;">`;
 						} else {
 							// 使用默认头像（首字母）
-							userAvatar.style = 'width:32px;height:32px;border-radius:50%;background:#FFD166;color:#2D3748;display:flex;align-items:center;justify-content:center;font-weight:bold;';
+							userAvatar.style = 'width:32px;height:32px;border-radius:50%;background:#FFD166;color:#2D3748;display:flex;align-items:center;justify-content:center;font-weight:bold;cursor:pointer;';
 							userAvatar.textContent = user.email.charAt(0).toUpperCase();
 						}
 						
-						const userEmail = document.createElement('span');
-						userEmail.style = 'color:#fff;font-size:0.9rem;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
-						// 优先显示用户名，其次是邮箱
-						userEmail.textContent = user.displayName || user.email;
-						userEmail.title = user.email; // 鼠标悬停时显示完整邮箱
+						// 创建下拉菜单
+						const dropdownMenu = document.createElement('div');
+						dropdownMenu.className = 'dropdown-menu';
+						dropdownMenu.style = 'display:none;position:absolute;top:40px;right:-10px;background:#fff;border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,0.15);min-width:90px;z-index:2000;';
 						
-						const logoutBtn = document.createElement('button');
-						logoutBtn.style = 'background:none;border:none;color:#FFD166;cursor:pointer;font-size:0.9rem;padding:4px 8px;';
-						logoutBtn.textContent = '退出';
-						logoutBtn.onclick = async function() {
+						// 添加三角形指示器
+						const triangle = document.createElement('div');
+						triangle.style = 'position:absolute;top:-6px;right:12px;width:0;height:0;border-left:6px solid transparent;border-right:6px solid transparent;border-bottom:6px solid #fff;';
+						dropdownMenu.appendChild(triangle);
+						
+						// 用户信息区域
+						const userInfoArea = document.createElement('div');
+						userInfoArea.style = 'padding:12px 15px;border-bottom:1px solid #eee;';
+						
+						const userName = document.createElement('div');
+						userName.style = 'font-weight:bold;font-size:0.9rem;color:#2D3748;margin-bottom:6px;word-break:break-all;';
+						userName.textContent = user.displayName || '';
+						
+						const userEmail = document.createElement('div');
+						userEmail.style = 'font-size:0.8rem;color:#718096;word-break:break-all;';
+						userEmail.textContent = user.email;
+						
+						userInfoArea.appendChild(userName);
+						userInfoArea.appendChild(userEmail);
+						dropdownMenu.appendChild(userInfoArea);
+						
+						// 退出按钮
+						const logoutBtn = document.createElement('div');
+						logoutBtn.style = 'padding:12px 15px;color:#E53E3E;font-size:0.85rem;cursor:pointer;transition:background 0.2s;';
+						logoutBtn.textContent = '退出登录';
+						logoutBtn.onmouseover = function() {
+							this.style.background = '#f7fafc';
+						};
+						logoutBtn.onmouseout = function() {
+							this.style.background = 'transparent';
+						};
+						logoutBtn.onclick = async function(e) {
+							e.stopPropagation(); // 防止事件冒泡
 							try {
 								const firebaseAuth = await waitForFirebase();
 								await firebaseAuth.logOut();
@@ -706,10 +810,94 @@
 								alert('退出失败: ' + error.message);
 							}
 						};
+						dropdownMenu.appendChild(logoutBtn);
+						
+						// 点击头像显示/隐藏下拉菜单
+						userAvatar.onclick = function(e) {
+							e.stopPropagation(); // 防止事件冒泡
+							if (dropdownMenu.style.display === 'none') {
+								dropdownMenu.style.display = 'block';
+								// 确保菜单显示在视口内
+								setTimeout(() => {
+									const rect = dropdownMenu.getBoundingClientRect();
+									if (rect.bottom > window.innerHeight) {
+										dropdownMenu.style.top = 'auto';
+										dropdownMenu.style.bottom = '40px';
+										// 移动三角形到底部
+										triangle.style.top = 'auto';
+										triangle.style.bottom = '-6px';
+										triangle.style.borderTop = '6px solid #fff';
+										triangle.style.borderBottom = 'none';
+									}
+								}, 0);
+							} else {
+								dropdownMenu.style.display = 'none';
+							}
+						};
+						
+						// 点击页面其他位置关闭下拉菜单
+						document.addEventListener('click', function() {
+							if (dropdownMenu && dropdownMenu.style.display === 'block') {
+								dropdownMenu.style.display = 'none';
+							}
+						});
+						
+						// 将下拉菜单添加到body，避免被导航栏容器限制
+						document.body.appendChild(dropdownMenu);
+						
+						// 记录头像位置，用于正确定位下拉菜单
+						function updateDropdownPosition() {
+							if (userAvatar && dropdownMenu) {
+								const rect = userAvatar.getBoundingClientRect();
+								dropdownMenu.style.position = 'fixed';
+								// 将菜单定位在导航栏下方
+								dropdownMenu.style.top = (rect.bottom + 5) + 'px';
+								
+								// 检测是否为移动设备
+								const isMobile = window.innerWidth < 768;
+								
+								if (isMobile) {
+									// 移动端：菜单居中显示，宽度更大
+									dropdownMenu.style.width = 'calc(100% - 40px)';
+									dropdownMenu.style.maxWidth = '320px';
+									dropdownMenu.style.left = '50%';
+									dropdownMenu.style.transform = 'translateX(-50%)';
+									
+									// 三角形居中
+									triangle.style.left = '50%';
+									triangle.style.marginLeft = '-6px';
+									triangle.style.right = 'auto';
+									
+									// 增加内边距
+									userInfoArea.style.padding = '16px 20px';
+									logoutBtn.style.padding = '16px 20px';
+									
+									// 增加字体大小
+									userName.style.fontSize = '1rem';
+									userName.style.marginBottom = '8px';
+									userEmail.style.fontSize = '0.85rem';
+									logoutBtn.style.fontSize = '0.95rem';
+								} else {
+									// 桌面端：将三角形指示器对准头像中心
+									const avatarCenter = rect.left + (rect.width / 2);
+									dropdownMenu.style.left = (avatarCenter - (dropdownMenu.offsetWidth / 2)) + 'px';
+									dropdownMenu.style.transform = '';
+									dropdownMenu.style.width = '';
+									dropdownMenu.style.maxWidth = '';
+									
+									// 调整三角形位置，使其对准头像中心
+									triangle.style.left = ((dropdownMenu.offsetWidth / 2) - 6) + 'px';
+									triangle.style.marginLeft = '';
+									triangle.style.right = 'auto';
+								}
+							}
+						}
+						
+						// 初始定位和窗口大小变化时重新定位
+						updateDropdownPosition();
+						window.addEventListener('resize', updateDropdownPosition);
 						
 						userMenu.appendChild(userAvatar);
-						userMenu.appendChild(userEmail);
-						userMenu.appendChild(logoutBtn);
 						document.querySelector('.navbar-menu').appendChild(userMenu);
 					}
 				} else {
@@ -726,37 +914,34 @@
 					if (userMenu) {
 						userMenu.remove();
 					}
+					
+					// 移除可能存在的下拉菜单
+					const dropdownMenu = document.querySelector('.dropdown-menu');
+					if (dropdownMenu) {
+						dropdownMenu.remove();
+					}
 				}
 			}
 			
 			// 监听用户登录状态
 			authStateListener(updateUserInterface);
 			
-			// 页面加载完成后立即检查用户状态
+			// 页面加载完成后检查用户状态
 			document.addEventListener('DOMContentLoaded', async function() {
-				try {
-					// 等待Firebase初始化完成
-					const firebaseAuth = await waitForFirebase();
-					console.log('Firebase初始化完成，正在检查用户状态');
-					
-					// 手动触发一次检查
-					if (firebaseAuth.auth.currentUser) {
-						updateUserInterface(firebaseAuth.auth.currentUser);
-					} else {
-						// 尝试从sessionStorage恢复用户信息
-						const storedUser = sessionStorage.getItem('currentUser');
-						if (storedUser) {
-							try {
-								const userInfo = JSON.parse(storedUser);
-								console.log('从sessionStorage恢复用户信息:', userInfo);
-								updateUserInterface(userInfo);
-							} catch (e) {
-								console.error('解析sessionStorage中的用户信息失败:', e);
-							}
+				// 如果sessionStorage中没有用户信息，再尝试从Firebase获取
+				if (!checkSessionStorageUser()) {
+					try {
+						// 等待Firebase初始化完成
+						const firebaseAuth = await waitForFirebase();
+						console.log('Firebase初始化完成，正在检查用户状态');
+						
+						// 手动触发一次检查
+						if (firebaseAuth.auth.currentUser) {
+							updateUserInterface(firebaseAuth.auth.currentUser);
 						}
+					} catch (error) {
+						console.error('检查用户状态失败:', error);
 					}
-				} catch (error) {
-					console.error('检查用户状态失败:', error);
 				}
 			});
 			
@@ -766,17 +951,6 @@
 					const firebaseAuth = await waitForFirebase();
 					if (firebaseAuth.auth.currentUser) {
 						updateUserInterface(firebaseAuth.auth.currentUser);
-					} else {
-						// 尝试从sessionStorage恢复用户信息
-						const storedUser = sessionStorage.getItem('currentUser');
-						if (storedUser) {
-							try {
-								const userInfo = JSON.parse(storedUser);
-								updateUserInterface(userInfo);
-							} catch (e) {
-								console.error('解析sessionStorage中的用户信息失败:', e);
-							}
-						}
 					}
 				} catch (error) {
 					console.error('定期检查用户状态失败:', error);

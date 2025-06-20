@@ -1,6 +1,48 @@
 // firebase.js
 let authStateListener = (callback) => { callback(null); };
 let db = null;
+// 添加同步状态追踪
+let syncAttempts = 0;
+const MAX_SYNC_ATTEMPTS = 3;
+
+// 检查localStorage中是否有用户信息，优先使用localStorage确保跨会话持久化
+const localUser = localStorage.getItem('currentUser');
+if (localUser) {
+  try {
+    const userInfo = JSON.parse(localUser);
+    console.log('Firebase初始化前从localStorage恢复用户信息:', userInfo);
+    // 同步到sessionStorage
+    sessionStorage.setItem('currentUser', localUser);
+    // 立即执行回调，不等待Firebase初始化
+    setTimeout(() => {
+      if (typeof callback === 'function') {
+        callback(userInfo);
+      }
+    }, 0);
+  } catch (e) {
+    console.error('解析localStorage中的用户信息失败:', e);
+  }
+} 
+// 如果localStorage中没有，再检查sessionStorage
+else {
+  const storedUser = sessionStorage.getItem('currentUser');
+  if (storedUser) {
+    try {
+      const userInfo = JSON.parse(storedUser);
+      console.log('Firebase初始化前从sessionStorage恢复用户信息:', userInfo);
+      // 同步到localStorage以确保持久化
+      localStorage.setItem('currentUser', storedUser);
+      // 立即执行回调，不等待Firebase初始化
+      setTimeout(() => {
+        if (typeof callback === 'function') {
+          callback(userInfo);
+        }
+      }, 0);
+    } catch (e) {
+      console.error('解析sessionStorage中的用户信息失败:', e);
+    }
+  }
+}
 
 try {
   // 动态导入 Firebase SDK
@@ -64,6 +106,40 @@ try {
 
     // 重新定义认证相关函数
     authStateListener = (callback) => {
+      // 先检查localStorage中是否有用户信息
+      const localUser = localStorage.getItem('currentUser');
+      if (localUser) {
+        try {
+          const userInfo = JSON.parse(localUser);
+          console.log('从localStorage恢复用户信息:', userInfo);
+          // 同步到sessionStorage
+          sessionStorage.setItem('currentUser', localUser);
+          // 立即执行回调，不等待Firebase初始化
+          setTimeout(() => {
+            callback(userInfo);
+          }, 0);
+        } catch (e) {
+          console.error('解析localStorage中的用户信息失败:', e);
+        }
+      } 
+      // 如果localStorage中没有，再检查sessionStorage
+      else {
+        const storedUser = sessionStorage.getItem('currentUser');
+        if (storedUser) {
+          try {
+            const userInfo = JSON.parse(storedUser);
+            console.log('从sessionStorage恢复用户信息:', userInfo);
+            // 立即执行回调，不等待Firebase初始化
+            setTimeout(() => {
+              callback(userInfo);
+            }, 0);
+          } catch (e) {
+            console.error('解析sessionStorage中的用户信息失败:', e);
+          }
+        }
+      }
+      
+      // 然后设置Firebase的状态监听
       return onAuthStateChanged(auth, user => {
         // 确保回调函数在用户状态变化时被调用
         if (user) {
@@ -79,14 +155,17 @@ try {
           
           console.log('用户信息:', userInfo);
           
-          // 将用户信息存储在sessionStorage中
-          sessionStorage.setItem('currentUser', JSON.stringify(userInfo));
+          // 将用户信息存储在localStorage和sessionStorage中
+          const userInfoStr = JSON.stringify(userInfo);
+          localStorage.setItem('currentUser', userInfoStr);
+          sessionStorage.setItem('currentUser', userInfoStr);
           
           // 登录后自动同步本地便签到云端
           syncNotesToCloud(user.uid);
         } else {
           console.log('Firebase 检测到用户未登录');
-          // 清除sessionStorage中的用户信息
+          // 清除localStorage和sessionStorage中的用户信息
+          localStorage.removeItem('currentUser');
           sessionStorage.removeItem('currentUser');
         }
         callback(user);
@@ -100,7 +179,12 @@ try {
         
         if (!userId) {
           console.error('同步便签失败: 没有用户ID');
-          return;
+          return { success: false, error: '没有用户ID' };
+        }
+        
+        if (!db) {
+          console.error('同步便签失败: 数据库未初始化');
+          return { success: false, error: '数据库未初始化' };
         }
         
         // 如果没有提供notesData，则从localStorage获取
@@ -118,7 +202,7 @@ try {
               const notes = JSON.parse(localStorage.getItem('floaty_notes') || '[]');
               if (notes.length === 0) {
                 console.log('本地没有便签列表，跳过同步');
-                return;
+                return { success: true, message: '没有数据需要同步' };
               }
               
               notesData = {
@@ -127,7 +211,7 @@ try {
               };
             } catch (error) {
               console.error('解析本地便签列表失败:', error);
-              return;
+              return { success: false, error: '解析本地便签列表失败' };
             }
           } else {
             // 使用单便签模式
@@ -139,27 +223,56 @@ try {
           }
         }
         
-        // 保存到云端
-        const userNotesRef = doc(db, 'user_notes', userId);
-        const userDoc = await getDoc(userNotesRef);
-        
-        if (userDoc.exists()) {
-          // 更新现有文档
-          await updateDoc(userNotesRef, notesData);
-          console.log('便签内容已更新到云端');
-        } else {
-          // 创建新文档
-          await setDoc(userNotesRef, {
-            ...notesData,
-            createdAt: serverTimestamp()
-          });
-          console.log('便签内容已保存到云端');
+        // 添加网络状态检查
+        if (!navigator.onLine) {
+          console.error('同步便签失败: 网络连接已断开');
+          return { success: false, error: '网络连接已断开', offline: true };
         }
         
-        return true;
+        // 保存到云端
+        const userNotesRef = doc(db, 'user_notes', userId);
+        
+        try {
+          const userDoc = await getDoc(userNotesRef);
+          
+          if (userDoc.exists()) {
+            // 更新现有文档
+            await updateDoc(userNotesRef, notesData);
+            console.log('便签内容已更新到云端');
+          } else {
+            // 创建新文档
+            await setDoc(userNotesRef, {
+              ...notesData,
+              createdAt: serverTimestamp()
+            });
+            console.log('便签内容已保存到云端');
+          }
+          
+          // 重置同步尝试计数
+          syncAttempts = 0;
+          
+          return { success: true };
+        } catch (error) {
+          console.error('同步便签到云端失败:', error);
+          
+          // 增加重试计数
+          syncAttempts++;
+          
+          // 如果未超过最大重试次数，返回特殊错误码
+          if (syncAttempts < MAX_SYNC_ATTEMPTS) {
+            return { 
+              success: false, 
+              error: error.message, 
+              shouldRetry: true,
+              attempt: syncAttempts
+            };
+          }
+          
+          return { success: false, error: error.message };
+        }
       } catch (error) {
-        console.error('同步便签到云端失败:', error);
-        return false;
+        console.error('同步便签到云端过程中发生错误:', error);
+        return { success: false, error: error.message };
       }
     }
     
@@ -173,46 +286,75 @@ try {
           return null;
         }
         
-        const userNotesRef = doc(db, 'user_notes', userId);
-        const userDoc = await getDoc(userNotesRef);
+        if (!db) {
+          console.error('加载便签失败: 数据库未初始化');
+          return null;
+        }
         
-        if (userDoc.exists()) {
-          const noteData = userDoc.data();
-          console.log('从云端获取到便签数据:', noteData);
+        // 添加网络状态检查
+        if (!navigator.onLine) {
+          console.error('加载便签失败: 网络连接已断开');
+          throw new Error('网络连接已断开');
+        }
+        
+        const userNotesRef = doc(db, 'user_notes', userId);
+        
+        try {
+          const userDoc = await getDoc(userNotesRef);
           
-          // 检查是否是新格式（包含notes数组）
-          if (noteData.notes) {
-            return {
-              notes: noteData.notes,
-              updatedAt: noteData.updatedAt ? noteData.updatedAt.toDate().getTime() : Date.now()
-            };
-          } 
-          // 旧格式（单便签）
-          else if (noteData.content) {
-            // 转换为新格式
-            const note = {
-              id: 'legacy-note',
-              content: noteData.content,
-              color: noteData.color || '#fffbe6',
-              createdAt: noteData.createdAt ? noteData.createdAt.toDate().getTime() : Date.now(),
-              updatedAt: noteData.updatedAt ? noteData.updatedAt.toDate().getTime() : Date.now()
-            };
+          if (userDoc.exists()) {
+            const noteData = userDoc.data();
+            console.log('从云端获取到便签数据:', noteData);
             
-            return {
-              notes: [note],
-              updatedAt: note.updatedAt
-            };
+            // 检查是否是新格式（包含notes数组）
+            if (noteData.notes) {
+              // 确保处理notes数组中的时间戳
+              const processedNotes = noteData.notes.map(note => {
+                // 确保updatedAt和createdAt是数字时间戳
+                if (note.updatedAt && typeof note.updatedAt.toDate === 'function') {
+                  note.updatedAt = note.updatedAt.toDate().getTime();
+                }
+                if (note.createdAt && typeof note.createdAt.toDate === 'function') {
+                  note.createdAt = note.createdAt.toDate().getTime();
+                }
+                return note;
+              });
+              
+              return {
+                notes: processedNotes,
+                updatedAt: noteData.updatedAt ? noteData.updatedAt.toDate().getTime() : Date.now()
+              };
+            } 
+            // 旧格式（单便签）
+            else if (noteData.content) {
+              // 转换为新格式
+              const note = {
+                id: 'legacy-note',
+                content: noteData.content,
+                color: noteData.color || '#fffbe6',
+                createdAt: noteData.createdAt ? noteData.createdAt.toDate().getTime() : Date.now(),
+                updatedAt: noteData.updatedAt ? noteData.updatedAt.toDate().getTime() : Date.now()
+              };
+              
+              return {
+                notes: [note],
+                updatedAt: note.updatedAt
+              };
+            } else {
+              console.log('云端便签数据格式不正确');
+              return null;
+            }
           } else {
-            console.log('云端便签数据格式不正确');
+            console.log('云端没有便签数据');
             return null;
           }
-        } else {
-          console.log('云端没有便签数据');
-          return null;
+        } catch (error) {
+          console.error('从云端获取便签数据失败:', error);
+          throw error;
         }
       } catch (error) {
         console.error('从云端加载便签失败:', error);
-        return null;
+        throw error;
       }
     }
     
@@ -242,6 +384,7 @@ try {
       },
       logOut: () => {
         sessionStorage.removeItem('currentUser');
+        localStorage.removeItem('currentUser');
         return signOut(auth);
       },
       authStateListener,
@@ -272,6 +415,18 @@ try {
       syncNotesToCloud(currentUser.uid);
     } else {
       console.log('当前没有登录用户');
+      
+      // 尝试从localStorage恢复用户信息
+      const storedUser = localStorage.getItem('currentUser');
+      if (storedUser) {
+        try {
+          const userInfo = JSON.parse(storedUser);
+          console.log('从localStorage恢复用户信息:', userInfo);
+          sessionStorage.setItem('currentUser', JSON.stringify(userInfo));
+        } catch (e) {
+          console.error('解析localStorage中的用户信息失败:', e);
+        }
+      }
     }
   }).catch(err => {
     console.error('Firebase 初始化失败:', err);
