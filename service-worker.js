@@ -1,4 +1,4 @@
-const CACHE_NAME = 'flowtips-cache-v3';
+const CACHE_NAME = 'flowtips-cache-v4';
 const CACHE_FILES = [
   './',
   'index.html',
