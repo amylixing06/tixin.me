@@ -16,8 +16,38 @@ if (location.search.includes('autoFloaty=1')) {
     if (btn) btn.click();
   });
 }
-// 响应式显示移动端联系我按钮
+
+// 底部新建便签按钮
+function setupMobileNewNoteBtn() {
+  const mobileBtn = document.getElementById('mobile-new-note-btn');
+  if (!mobileBtn) return;
+  
+  // 始终显示底部按钮
+  mobileBtn.style.display = 'block';
+  
+  // 绑定点击事件
+  const btnElement = mobileBtn.querySelector('button');
+  if (btnElement) {
+    btnElement.onclick = function() {
+      // 调用隐藏按钮的点击事件
+      const newBtn = document.getElementById('new-note-btn');
+      if (newBtn && typeof newBtn.onclick === 'function') {
+        newBtn.onclick();
+      } else {
+        // 如果找不到隐藏按钮或没有点击事件，直接尝试调用floaty.js中的函数
+        if (window.openFloatyNote) {
+          window.openFloatyNote('');
+        } else if (window.showInlineNote) {
+          window.showInlineNote('');
+        }
+      }
+    };
+  }
+}
+
+// 响应式显示移动端元素
 function checkMobileView() {
+  // 移动端联系按钮
   const mobileContact = document.getElementById('mobile-contact');
   if (mobileContact) {
     if (window.innerWidth < 768) {
@@ -26,7 +56,11 @@ function checkMobileView() {
       mobileContact.style.display = 'none';
     }
   }
+  
+  // 移动端底部新建便签按钮
+  setupMobileNewNoteBtn();
 }
+
 window.addEventListener('load', checkMobileView);
 window.addEventListener('resize', checkMobileView);
 

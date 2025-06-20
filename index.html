@@ -229,6 +229,7 @@
 		  display: flex;
 		  flex-direction: column;
 		  align-items: center;
+		  min-height: calc(100vh - 140px); /* 确保内容区域足够高 */
 		}
 		/* 联系我按钮和二维码样式 */
 		.contact-container {
@@ -335,8 +336,7 @@
 			<!-- 便签列表区域 -->
 			<div class="notes-container">
 			  <div class="notes-header">
-				<div class="notes-title">我的便签</div>
-				<button id="new-note-btn" style="padding:8px 16px;font-size:0.9rem;border:none;border-radius:6px;background:#2D3748;color:#FFD166;cursor:pointer;">新建便签</button>
+				<div id="new-note-btn" style="display:none;">隐藏按钮</div>
 			  </div>
 			  <div id="notes-list" class="notes-list">
 				<!-- 便签列表将通过JavaScript动态生成 -->
@@ -346,11 +346,11 @@
 				    <div style="text-align:left;">
 					  <div style="margin-bottom:15px;display:flex;align-items:center;">
 					    <span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">1</span>
-					    <span>点击"新建便签"，即可开启全局悬浮便签</span>
+					    <span>点"新建便签"，创建悬浮或内联便签</span>
 					  </div>
 					  <div style="margin-bottom:15px;display:flex;align-items:center;">
 					    <span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">2</span>
-					    <span>输入内容自动保存，支持四种颜色切换</span>
+					    <span>输入内容自动保存，多便签颜色切换</span>
 					  </div>
 					  <div style="margin-bottom:15px;display:flex;align-items:center;">
 					    <span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">3</span>
@@ -358,7 +358,7 @@
 					  </div>
 					  <div style="margin-bottom:0;display:flex;align-items:center;">
 					    <span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">4</span>
-					    <span>仅支持Chrome、Edge等现代浏览器</span>
+					    <span>登录后便签内容自动同步到云端</span>
 					  </div>
 				    </div>
 				  </div>
@@ -367,8 +367,23 @@
 		</div>
 		</div>
 
+		<!-- 底部新建便签按钮 -->
+		<div id="mobile-new-note-btn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:99;display:block;">
+			<button style="padding:12px 24px;font-size:1.1rem;border:none;border-radius:30px;background:#2D3748;color:#FFD166;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.2);">新建便签</button>
+		</div>
+
+		<!-- 内联便签容器 -->
+		<div id="floaty-note" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%, -50%);width:90%;max-width:400px;height:400px;background:#fffbe6;border-radius:10px;box-shadow:0 5px 20px rgba(0,0,0,0.2);z-index:2000;padding:20px;box-sizing:border-box;flex-direction:column;">
+			<textarea id="plain-editor" style="width:100%;height:calc(100% - 40px);border:none;background:transparent;resize:none;outline:none;font-size:1rem;line-height:1.5;margin-bottom:10px;padding:0;"></textarea>
+			<div style="display:flex;justify-content:space-between;align-items:center;">
+				<div id="color-picker" style="display:flex;gap:10px;"></div>
+				<button id="save-note-btn" style="padding:6px 12px;background:#2D3748;color:#FFD166;border:none;border-radius:4px;cursor:pointer;">保存</button>
+				<button id="close-note-btn" style="padding:6px 12px;background:#ccc;color:#333;border:none;border-radius:4px;cursor:pointer;" onclick="document.getElementById('floaty-note').style.display='none';">关闭</button>
+			</div>
+		</div>
+
 		<!-- 页脚 -->
-		<footer class="footer">
+		<footer class="footer" id="terms-footer">
 			<div class="footer-content">
 				<span>使用本产品即代表您同意</span>
 				<a href="privacy.html">隐私条款</a>
@@ -396,6 +411,12 @@
 						<label style="display:block;margin-bottom:8px;font-size:0.9rem;color:#4A5568;">密码</label>
 						<input type="password" id="login-password" style="width:100%;padding:12px;border:1px solid #E2E8F0;border-radius:6px;font-size:1rem;box-sizing:border-box;" placeholder="请输入密码" required>
 						<div id="login-error" style="color:#E53E3E;font-size:0.9rem;margin-top:5px;display:none;"></div>
+					</div>
+					<div style="margin-bottom:15px;">
+						<label style="display:flex;align-items:center;font-size:0.9rem;color:#4A5568;cursor:pointer;">
+							<input type="checkbox" id="login-terms-agree" style="margin-right:8px;" required>
+							<span>我已阅读并同意<a href="terms.html" target="_blank" style="color:#2D3748;text-decoration:underline;margin:0 4px;">服务条款</a>、<a href="privacy.html" target="_blank" style="color:#2D3748;text-decoration:underline;margin:0 4px;">隐私条款</a>和<a href="cache.html" target="_blank" style="color:#2D3748;text-decoration:underline;margin:0 4px;">缓存条款</a></span>
+						</label>
 					</div>
 					<button type="submit" style="width:100%;padding:12px;background:#2D3748;color:#FFD166;border:none;border-radius:6px;font-size:1rem;font-weight:bold;cursor:pointer;">登录</button>
 					<button type="button" id="google-login-btn" style="width:100%;padding:12px;background:#fff;color:#222;border:1px solid #ccc;margin-top:12px;display:flex;align-items:center;justify-content:center;gap:8px;font-size:1rem;cursor:pointer;border-radius:6px;">
@@ -428,6 +449,12 @@
 						<label style="display:block;margin-bottom:8px;font-size:0.9rem;color:#4A5568;">确认密码</label>
 						<input type="password" id="register-confirm-password" style="width:100%;padding:12px;border:1px solid #E2E8F0;border-radius:6px;font-size:1rem;box-sizing:border-box;" placeholder="请再次输入密码" required>
 						<div id="register-error" style="color:#E53E3E;font-size:0.9rem;margin-top:5px;display:none;"></div>
+					</div>
+					<div style="margin-bottom:15px;">
+						<label style="display:flex;align-items:center;font-size:0.9rem;color:#4A5568;cursor:pointer;">
+							<input type="checkbox" id="register-terms-agree" style="margin-right:8px;" required>
+							<span>我已阅读并同意<a href="terms.html" target="_blank" style="color:#2D3748;text-decoration:underline;margin:0 4px;">服务条款</a>、<a href="privacy.html" target="_blank" style="color:#2D3748;text-decoration:underline;margin:0 4px;">隐私条款</a>和<a href="cache.html" target="_blank" style="color:#2D3748;text-decoration:underline;margin:0 4px;">缓存条款</a></span>
+						</label>
 					</div>
 					<button type="submit" style="width:100%;padding:12px;background:#2D3748;color:#FFD166;border:none;border-radius:6px;font-size:1rem;font-weight:bold;cursor:pointer;">注册</button>
 					<div style="margin-top:20px;text-align:center;font-size:0.9rem;color:#718096;">
@@ -478,7 +505,15 @@
 				e.preventDefault();
 				const email = document.getElementById('login-email').value;
 				const password = document.getElementById('login-password').value;
+				const termsAgree = document.getElementById('login-terms-agree').checked;
 				const errorElement = document.getElementById('login-error');
+				
+				// 检查是否同意条款
+				if (!termsAgree) {
+					errorElement.textContent = '请阅读并同意相关条款';
+					errorElement.style.display = 'block';
+					return;
+				}
 				
 				try {
 					// 等待Firebase初始化完成
@@ -505,11 +540,19 @@
 				const email = document.getElementById('register-email').value;
 				const password = document.getElementById('register-password').value;
 				const confirmPassword = document.getElementById('register-confirm-password').value;
+				const termsAgree = document.getElementById('register-terms-agree').checked;
 				const errorElement = document.getElementById('register-error');
 				
 				// 验证两次密码是否一致
 				if (password !== confirmPassword) {
 					errorElement.textContent = '两次输入的密码不一致';
+					errorElement.style.display = 'block';
+					return;
+				}
+				
+				// 检查是否同意条款
+				if (!termsAgree) {
+					errorElement.textContent = '请阅读并同意相关条款';
 					errorElement.style.display = 'block';
 					return;
 				}
@@ -535,6 +578,16 @@
 			
 			// Google登录
 			document.getElementById('google-login-btn').addEventListener('click', async function() {
+				// 检查是否同意条款
+				const termsAgree = document.getElementById('login-terms-agree').checked;
+				const errorElement = document.getElementById('login-error');
+				
+				if (!termsAgree) {
+					errorElement.textContent = '请阅读并同意相关条款';
+					errorElement.style.display = 'block';
+					return;
+				}
+				
 				try {
 					// 等待Firebase初始化完成
 					const firebaseAuth = await waitForFirebase();
@@ -603,12 +656,16 @@
 			function updateUserInterface(user) {
 				const loginBtn = document.querySelector('.navbar-menu a[onclick="showLoginModal()"]');
 				const registerBtn = document.querySelector('.navbar-menu a[onclick="showRegisterModal()"]');
+				const termsFooter = document.getElementById('terms-footer');
 				
 				if (user) {
 					console.log('用户已登录:', user.email);
 					// 用户已登录，隐藏登录和注册按钮
 					if (loginBtn) loginBtn.style.display = 'none';
 					if (registerBtn) registerBtn.style.display = 'none';
+					
+					// 隐藏页脚条款信息
+					if (termsFooter) termsFooter.style.display = 'none';
 					
 					// 添加用户头像和退出按钮
 					let userMenu = document.querySelector('.navbar-menu .user-menu');
@@ -660,6 +717,9 @@
 					// 用户未登录，显示登录和注册按钮
 					if (loginBtn) loginBtn.style.display = '';
 					if (registerBtn) registerBtn.style.display = '';
+					
+					// 显示页脚条款信息
+					if (termsFooter) termsFooter.style.display = '';
 					
 					// 移除用户头像和退出按钮
 					const userMenu = document.querySelector('.navbar-menu .user-menu');

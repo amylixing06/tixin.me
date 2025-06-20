@@ -1,4 +1,4 @@
-const CACHE_NAME = 'flowtips-cache-v4';
+const CACHE_NAME = 'flowtips-cache-v5';
 const CACHE_FILES = [
   './',
   'index.html',
@@ -11,7 +11,10 @@ const CACHE_FILES = [
   'cache.html',
   'wechat-qr.jpg',
   'octopus.png',
-  'favicon.ico' // 根目录下的favicon
+  'favicon.ico',
+  'public/icon-192.png',
+  'public/icon-512.png',
+  'public/octopus_icon.png'
 ];
 
 // 不存在但可能被请求的旧文件列表

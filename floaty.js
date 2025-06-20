@@ -148,31 +148,30 @@ function mergeNotes(localNotes, cloudNotes) {
   if (!('documentPictureInPicture' in window)) {
     console.error('当前浏览器不支持全局悬浮便签 (documentPictureInPicture API)');
     if (btn) btn.disabled = true;
-    // 给新建便签按钮添加提示
+    // 给新建便签按钮添加提示，但允许创建内联便签
     const newBtn = document.getElementById('new-note-btn');
     if (newBtn) {
-      newBtn.disabled = true;
-      newBtn.title = '当前浏览器不支持全局悬浮便签';
+      newBtn.title = '当前浏览器不支持全局悬浮便签，将使用内联便签';
       newBtn.onclick = function() {
-        alert('当前浏览器不支持全局悬浮便签，请使用最新版Chrome浏览器');
+        console.log('浏览器不支持全局悬浮，使用内联便签替代');
+        showInlineNote();
       };
     }
-    return;
-  }
-  
-  const note = document.getElementById('floaty-note');
-  const textarea = note ? note.querySelector('textarea') : null;
-  const newBtn = document.getElementById('new-note-btn');
-
-  // 新建便签 - 确保按钮存在并正确绑定事件
-  if (newBtn) {
-    console.log('找到新建便签按钮，绑定点击事件');
-    newBtn.onclick = function() {
-      console.log('新建便签按钮被点击');
-      openFloatyNote('');
-    };
   } else {
-    console.error('未找到新建便签按钮 (id="new-note-btn")');
+    const note = document.getElementById('floaty-note');
+    const textarea = note ? note.querySelector('textarea') : null;
+    const newBtn = document.getElementById('new-note-btn');
+
+    // 新建便签 - 确保按钮存在并正确绑定事件
+    if (newBtn) {
+      console.log('找到新建便签按钮，绑定点击事件');
+      newBtn.onclick = function() {
+        console.log('新建便签按钮被点击');
+        openFloatyNote('');
+      };
+    } else {
+      console.error('未找到新建便签按钮 (id="new-note-btn")');
+    }
   }
 
   const COLORS = [
@@ -262,11 +261,11 @@ function mergeNotes(localNotes, cloudNotes) {
         + '<div style="text-align:left;">'
         + '<div style="margin-bottom:15px;display:flex;align-items:center;">'
         + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">1</span>'
-        + '<span>点击"新建便签"，即可开启全局悬浮便签</span>'
+        + '<span>点"新建便签"，创建悬浮或内联便签</span>'
         + '</div>'
         + '<div style="margin-bottom:15px;display:flex;align-items:center;">'
         + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">2</span>'
-        + '<span>输入内容自动保存，支持四种颜色切换</span>'
+        + '<span>输入内容自动保存，多便签颜色切换</span>'
         + '</div>'
         + '<div style="margin-bottom:15px;display:flex;align-items:center;">'
         + '<span style="display:inline-block;width:24px;height:24px;background:#2D3748;color:#FFD166;border-radius:50%;text-align:center;line-height:24px;margin-right:10px;font-weight:bold;">3</span>'
@@ -298,14 +297,33 @@ function mergeNotes(localNotes, cloudNotes) {
     
     notesList.innerHTML = html;
     
-    // 添加事件监听
+    // 点击便签内容区域也可以编辑
+    notesList.querySelectorAll('.note-content').forEach(content => {
+      content.onclick = function() {
+        const noteId = this.parentNode.getAttribute('data-id');
+        const note = notes.find(n => n.id === noteId);
+        if (note) {
+          if ('documentPictureInPicture' in window) {
+            openFloatyNote(note.content, noteId);
+          } else {
+            showInlineNote(note.content, noteId);
+          }
+        }
+      };
+    });
+    
+    // 编辑按钮事件
     notesList.querySelectorAll('.edit-note-btn').forEach(btn => {
       btn.onclick = function(e) {
         e.stopPropagation();
         const noteId = this.getAttribute('data-id');
         const note = notes.find(n => n.id === noteId);
         if (note) {
-          openFloatyNote(note.content, noteId);
+          if ('documentPictureInPicture' in window) {
+            openFloatyNote(note.content, noteId);
+          } else {
+            showInlineNote(note.content, noteId);
+          }
         }
       };
     });
@@ -322,29 +340,14 @@ function mergeNotes(localNotes, cloudNotes) {
       };
     });
     
-    // 点击便签内容区域也可以编辑
-    notesList.querySelectorAll('.note-content').forEach(content => {
-      content.onclick = function() {
-        const noteId = this.parentNode.getAttribute('data-id');
-        const note = notes.find(n => n.id === noteId);
-        if (note) {
-          openFloatyNote(note.content, noteId);
-        }
-      };
-    });
-    
-    // 显示云同步状态
-    const syncStatus = document.createElement('div');
-    syncStatus.style = 'text-align:center;margin-top:20px;font-size:12px;color:#666;';
-    syncStatus.id = 'sync-status';
-    
-    if (currentUser) {
-      syncStatus.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;gap:8px;"><span>✅ 已登录，便签内容自动同步到云端</span></div>';
-    } else {
+    // 显示云同步状态（仅未登录时显示）
+    if (!currentUser) {
+      const syncStatus = document.createElement('div');
+      syncStatus.style = 'text-align:center;margin-top:20px;font-size:12px;color:#666;';
+      syncStatus.id = 'sync-status';
       syncStatus.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;gap:8px;"><span>ℹ️ 登录后便签内容将自动同步到云端</span></div>';
+      notesList.appendChild(syncStatus);
     }
-    
-    notesList.appendChild(syncStatus);
   }
 
   window.addEventListener('storage', function(e) {
@@ -363,45 +366,73 @@ function mergeNotes(localNotes, cloudNotes) {
 
   // 主页面弹窗初始化 Quill
   let quill;
-  function showInlineNote() {
+  function showInlineNote(content, editingId) {
     let note = document.getElementById('floaty-note');
     if (!note) return;
-    const { content, color } = getNoteData();
-    note.style.display = 'block';
-    note.style.background = color;
-    // textarea 替换 Quill
+    
+    // 如果是新建便签（没有editingId），立即生成一个唯一ID
+    const newNoteId = editingId || uuid();
+    console.log('内联便签ID:', newNoteId, editingId ? '(编辑已有便签)' : '(新建便签)');
+    
+    // 设置编辑ID
+    note._editingId = editingId;
+    
+    // 获取便签数据
+    let noteData = { content: '', color: COLORS[1] };
+    if (editingId) {
+      noteData = getNoteData(editingId);
+    }
+    
+    // 显示便签
+    note.style.display = 'flex';
+    note.style.background = noteData.color || COLORS[1];
+    
+    // 设置文本内容
     let textarea = document.getElementById('plain-editor');
-    textarea.value = content;
-    textarea.style.background = color;
-    textarea.style.width = '100%';
-    textarea.style.height = '100%';
-    textarea.style.boxSizing = 'border-box';
+    textarea.value = content || noteData.content || '';
+    textarea.style.background = 'transparent';
     textarea.focus();
+    
     // 颜色选择区
-    const COLORS = [
-      '#fff', '#fffbe6', '#fff0f6', '#e6f7ff'
-    ];
     let colorPicker = document.getElementById('color-picker');
     if (colorPicker) {
       colorPicker.innerHTML = '';
       COLORS.forEach(c => {
         const colorDot = document.createElement('span');
         colorDot.style = `width:22px;height:22px;border-radius:50%;border:2px solid #ccc;display:inline-block;cursor:pointer;background:${c};box-shadow:0 1px 4px #0001;`;
-        if ((textarea.style.background||color) === c) colorDot.style.border = '2px solid #333';
+        if ((note.style.background||noteData.color) === c) colorDot.style.border = '2px solid #333';
         colorDot.onclick = function() {
-          textarea.style.background = c;
-          saveNoteData(textarea.value, c);
+          note.style.background = c;
           colorPicker.querySelectorAll('span').forEach(dot => dot.style.border = '2px solid #ccc');
           colorDot.style.border = '2px solid #333';
         };
         colorPicker.appendChild(colorDot);
       });
     }
+    
     // 保存按钮
     let saveBtn = document.getElementById('save-note-btn');
     if (saveBtn) {
+      saveBtn.textContent = editingId ? '更新' : '保存';
       saveBtn.onclick = function() {
-        saveNoteData(textarea.value, textarea.style.background || color);
+        const val = textarea.value;
+        const color = note.style.background;
+        
+        if (val && val.trim()) {
+          if (!note._editingId) {
+            // 新建便签
+            saveNoteData(val, color || COLORS[1]);
+          } else {
+            // 更新已有便签
+            saveNoteData(val, color || COLORS[1], note._editingId);
+          }
+          
+          // 隐藏便签
+          note.style.display = 'none';
+          
+          // 显示保存成功提示
+          alert(editingId ? '便签已更新' : '便签已保存');
+        }
       };
     }
     
@@ -415,30 +446,6 @@ function mergeNotes(localNotes, cloudNotes) {
       saveTimeout = setTimeout(() => {
         const val = textarea.value;
         if (val && val.trim()) {
-          saveNoteData(val, textarea.style.background || color);
-        }
-      }, 1000);
-    };
-  }
-
-  if (btn) {
-    btn.onclick = function() {
-      openFloatyNote('');
-    };
-  }
-
-  // 便签弹窗保存逻辑
-  if (note && textarea) {
-    // 输入时自动保存，添加防抖
-    let saveTimeout;
-    textarea.oninput = function() {
-      // 清除之前的定时器
-      if (saveTimeout) clearTimeout(saveTimeout);
-      
-      // 设置新的定时器，输入停止1秒后自动保存
-      saveTimeout = setTimeout(() => {
-        const val = textarea.value;
-        if (val.trim()) {
           if (!note._editingId) {
             // 新建便签
             saveNoteData(val, note.style.background || COLORS[1]);
@@ -449,10 +456,11 @@ function mergeNotes(localNotes, cloudNotes) {
         }
       }, 1000);
     };
-    
-    // 失焦时清理编辑状态
-    textarea.onblur = function() {
-      note._editingId = null;
+  }
+
+  if (btn) {
+    btn.onclick = function() {
+      openFloatyNote('');
     };
   }
 
@@ -663,8 +671,9 @@ function mergeNotes(localNotes, cloudNotes) {
     }
   }
   
-  // 将 openFloatyNote 函数暴露到全局，方便调试
+  // 将函数暴露给全局
   window.openFloatyNote = openFloatyNote;
+  window.showInlineNote = showInlineNote;
   
   console.log('便签功能初始化完成');
 })();
