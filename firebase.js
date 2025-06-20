@@ -207,7 +207,9 @@ try {
               
               notesData = {
                 notes: notes,
-                updatedAt: serverTimestamp()
+                updatedAt: serverTimestamp(),
+                deviceId: localStorage.getItem('device_id') || 'unknown-device',
+                syncVersion: parseInt(localStorage.getItem('last_sync_version') || '0') + 1
               };
             } catch (error) {
               console.error('解析本地便签列表失败:', error);
@@ -218,7 +220,9 @@ try {
             notesData = {
               content: noteContent,
               color: noteColor,
-              updatedAt: serverTimestamp()
+              updatedAt: serverTimestamp(),
+              deviceId: localStorage.getItem('device_id') || 'unknown-device',
+              syncVersion: parseInt(localStorage.getItem('last_sync_version') || '0') + 1
             };
           }
         }
@@ -235,7 +239,36 @@ try {
         try {
           const userDoc = await getDoc(userNotesRef);
           
+          // 检查是否存在冲突
           if (userDoc.exists()) {
+            const cloudData = userDoc.data();
+            
+            // 检查设备ID和同步版本
+            if (cloudData.deviceId && 
+                cloudData.deviceId !== notesData.deviceId && 
+                cloudData.syncVersion >= notesData.syncVersion) {
+              
+              console.warn('检测到潜在冲突，云端数据可能更新');
+              
+              // 获取云端更新时间
+              const cloudUpdatedAt = cloudData.updatedAt ? 
+                (typeof cloudData.updatedAt.toDate === 'function' ? 
+                  cloudData.updatedAt.toDate().getTime() : cloudData.updatedAt) : 0;
+              
+              // 获取本地上次同步时间
+              const lastSyncTimestamp = parseInt(localStorage.getItem('last_sync_timestamp') || '0');
+              
+              // 如果云端数据比本地上次同步更新，则可能存在冲突
+              if (cloudUpdatedAt > lastSyncTimestamp) {
+                console.warn('检测到数据冲突，需要先合并数据');
+                return { 
+                  success: false, 
+                  error: '检测到数据冲突，需要先合并数据', 
+                  conflict: true 
+                };
+              }
+            }
+            
             // 更新现有文档
             await updateDoc(userNotesRef, notesData);
             console.log('便签内容已更新到云端');
@@ -277,9 +310,9 @@ try {
     }
     
     // 从云端加载便签内容
-    async function loadNotesFromCloud(userId) {
+    async function loadNotesFromCloud(userId, syncOptions = {}) {
       try {
-        console.log('正在从云端加载便签...');
+        console.log('正在从云端加载便签...', syncOptions);
         
         if (!userId) {
           console.error('加载便签失败: 没有用户ID');
@@ -306,6 +339,21 @@ try {
             const noteData = userDoc.data();
             console.log('从云端获取到便签数据:', noteData);
             
+            // 检查是否是增量同步
+            if (syncOptions.lastSyncTimestamp && syncOptions.deviceId) {
+              const lastSyncTimestamp = parseInt(syncOptions.lastSyncTimestamp);
+              const cloudUpdatedAt = noteData.updatedAt ? 
+                (typeof noteData.updatedAt.toDate === 'function' ? noteData.updatedAt.toDate().getTime() : noteData.updatedAt) : 0;
+              
+              // 如果云端数据没有更新，且不是来自当前设备的更新，则返回无变化
+              if (cloudUpdatedAt <= lastSyncTimestamp && 
+                  noteData.deviceId !== syncOptions.deviceId && 
+                  noteData.syncVersion <= parseInt(syncOptions.lastSyncVersion || '0')) {
+                console.log('云端数据没有变化，跳过同步');
+                return { noChanges: true };
+              }
+            }
+            
             // 检查是否是新格式（包含notes数组）
             if (noteData.notes) {
               // 确保处理notes数组中的时间戳
@@ -320,9 +368,22 @@ try {
                 return note;
               });
               
+              // 检查是否有冲突（如果是增量同步）
+              let hasConflicts = false;
+              if (syncOptions.lastSyncTimestamp) {
+                // 如果云端设备ID与当前设备不同，且有更新，可能存在冲突
+                hasConflicts = noteData.deviceId !== syncOptions.deviceId && 
+                               noteData.syncVersion !== parseInt(syncOptions.lastSyncVersion || '0');
+              }
+              
               return {
                 notes: processedNotes,
-                updatedAt: noteData.updatedAt ? noteData.updatedAt.toDate().getTime() : Date.now()
+                updatedAt: noteData.updatedAt ? 
+                  (typeof noteData.updatedAt.toDate === 'function' ? noteData.updatedAt.toDate().getTime() : noteData.updatedAt) : 
+                  Date.now(),
+                syncVersion: noteData.syncVersion || 1,
+                deviceId: noteData.deviceId,
+                hasConflicts
               };
             } 
             // 旧格式（单便签）
@@ -332,13 +393,18 @@ try {
                 id: 'legacy-note',
                 content: noteData.content,
                 color: noteData.color || '#fffbe6',
-                createdAt: noteData.createdAt ? noteData.createdAt.toDate().getTime() : Date.now(),
-                updatedAt: noteData.updatedAt ? noteData.updatedAt.toDate().getTime() : Date.now()
+                createdAt: noteData.createdAt ? 
+                  (typeof noteData.createdAt.toDate === 'function' ? noteData.createdAt.toDate().getTime() : noteData.createdAt) : 
+                  Date.now(),
+                updatedAt: noteData.updatedAt ? 
+                  (typeof noteData.updatedAt.toDate === 'function' ? noteData.updatedAt.toDate().getTime() : noteData.updatedAt) : 
+                  Date.now()
               };
               
               return {
                 notes: [note],
-                updatedAt: note.updatedAt
+                updatedAt: note.updatedAt,
+                syncVersion: 1
               };
             } else {
               console.log('云端便签数据格式不正确');

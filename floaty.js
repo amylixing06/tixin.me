@@ -57,8 +57,16 @@ function saveNotes(notes) {
 
 // 同步便签到云端
 async function syncNotesToCloud(notes) {
-  // 如果没有登录或者没有Firebase，或者正在同步中，则不执行
-  if (!currentUser || !window.firebaseDB || isSyncing) return;
+  // 如果没有登录或者没有Firebase，则不执行
+  if (!currentUser || !window.firebaseDB) return;
+  
+  // 如果正在同步中，将请求加入队列
+  if (isSyncing) {
+    console.log('已有同步任务在进行中，将在当前任务完成后自动重试');
+    // 设置一个标志，表示有待处理的同步请求
+    window.pendingSyncRequest = true;
+    return;
+  }
   
   try {
     // 设置同步状态
@@ -69,11 +77,30 @@ async function syncNotesToCloud(notes) {
     // 获取当前时间戳
     const timestamp = Date.now();
     
+    // 确保所有便签都有正确的ID和时间戳
+    const validatedNotes = notes.map(note => {
+      if (!note.id) {
+        note.id = uuid();
+      }
+      if (!note.createdAt) {
+        note.createdAt = timestamp;
+      }
+      if (!note.updatedAt) {
+        note.updatedAt = timestamp;
+      }
+      return note;
+    });
+    
     // 准备要保存的数据
     const notesData = {
-      notes: notes,
-      updatedAt: window.firebaseDB.serverTimestamp ? window.firebaseDB.serverTimestamp() : timestamp
+      notes: validatedNotes,
+      updatedAt: window.firebaseDB.serverTimestamp ? window.firebaseDB.serverTimestamp() : timestamp,
+      deviceId: getDeviceId(), // 添加设备标识，用于多设备同步
+      syncVersion: (window.syncVersion || 0) + 1 // 增加同步版本号
     };
+    
+    // 保存当前同步版本号
+    window.syncVersion = notesData.syncVersion;
     
     // 调用Firebase同步函数
     const result = await window.firebaseDB.syncNotesToCloud(currentUser.uid, notesData);
@@ -84,6 +111,20 @@ async function syncNotesToCloud(notes) {
       lastSyncStatus = 'success';
       updateSyncStatus('success');
       console.log('便签已同步到云端');
+      
+      // 保存最后一次成功同步的时间戳
+      localStorage.setItem('last_sync_timestamp', timestamp);
+      localStorage.setItem('last_sync_version', window.syncVersion);
+      
+      // 检查是否有待处理的同步请求
+      if (window.pendingSyncRequest) {
+        window.pendingSyncRequest = false;
+        setTimeout(() => {
+          console.log('处理待处理的同步请求');
+          isSyncing = false;
+          syncNotesToCloud(getNotes());
+        }, 1000);
+      }
     } else if (result && !result.success) {
       // 处理同步失败情况
       console.error('同步便签到云端失败:', result.error);
@@ -93,13 +134,34 @@ async function syncNotesToCloud(notes) {
       if (result.offline) {
         updateSyncStatus('error', '网络连接已断开，将在网络恢复后自动重试');
         
+        // 保存待同步数据到本地存储
+        try {
+          localStorage.setItem('pending_sync_notes', JSON.stringify(validatedNotes));
+          localStorage.setItem('pending_sync_timestamp', timestamp);
+        } catch (e) {
+          console.error('保存待同步数据失败:', e);
+        }
+        
         // 添加网络恢复事件监听
         window.addEventListener('online', function onlineHandler() {
           console.log('网络已恢复，尝试重新同步');
           window.removeEventListener('online', onlineHandler);
+          
+          // 获取待同步数据
+          let pendingNotes;
+          try {
+            pendingNotes = JSON.parse(localStorage.getItem('pending_sync_notes') || '[]');
+          } catch (e) {
+            console.error('解析待同步数据失败:', e);
+            pendingNotes = getNotes();
+          }
+          
           setTimeout(() => {
             isSyncing = false;
-            syncNotesToCloud(notes);
+            syncNotesToCloud(pendingNotes);
+            // 清除待同步数据
+            localStorage.removeItem('pending_sync_notes');
+            localStorage.removeItem('pending_sync_timestamp');
           }, 2000);
         });
       } else if (result.shouldRetry) {
@@ -111,11 +173,46 @@ async function syncNotesToCloud(notes) {
         setTimeout(() => {
           isSyncing = false;
           console.log(`第 ${result.attempt} 次重试同步，延迟 ${retryDelay}ms`);
-          syncNotesToCloud(notes);
+          syncNotesToCloud(validatedNotes);
         }, retryDelay);
+      } else if (result.conflict) {
+        // 处理数据冲突情况
+        console.warn('检测到数据冲突，正在解决...');
+        updateSyncStatus('syncing', '正在解决数据冲突...');
+        
+        // 加载云端数据
+        const cloudResult = await window.firebaseDB.loadNotesFromCloud(currentUser.uid);
+        if (cloudResult && cloudResult.notes) {
+          // 合并本地和云端数据
+          const mergedNotes = mergeNotes(validatedNotes, cloudResult.notes);
+          
+          // 更新本地存储
+          saveNotes(mergedNotes);
+          
+          // 重新同步合并后的数据
+          setTimeout(() => {
+            isSyncing = false;
+            syncNotesToCloud(mergedNotes);
+          }, 1000);
+        } else {
+          // 无法获取云端数据，使用本地数据
+          updateSyncStatus('error', '解决冲突失败，将重试同步');
+          setTimeout(() => {
+            isSyncing = false;
+            syncNotesToCloud(validatedNotes);
+          }, 5000);
+        }
       } else {
         // 其他错误情况
         updateSyncStatus('error', result.error || '同步失败');
+        
+        // 一段时间后重试
+        setTimeout(() => {
+          isSyncing = false;
+          if (window.navigator.onLine) {
+            syncNotesToCloud(validatedNotes);
+          }
+        }, 10000); // 10秒后重试
       }
       return;
     }
@@ -128,7 +225,7 @@ async function syncNotesToCloud(notes) {
     // 添加重试逻辑
     setTimeout(() => {
       isSyncing = false; // 重置同步状态，允许下次尝试
-      if (currentUser && window.firebaseDB) {
+      if (currentUser && window.firebaseDB && window.navigator.onLine) {
         console.log('尝试重新同步...');
         syncNotesToCloud(notes);
       }
@@ -140,6 +237,16 @@ async function syncNotesToCloud(notes) {
       isSyncing = false;
     }, 1000);
   }
+}
+
+// 获取或生成设备ID，用于多设备同步
+function getDeviceId() {
+  let deviceId = localStorage.getItem('device_id');
+  if (!deviceId) {
+    deviceId = 'device_' + uuid();
+    localStorage.setItem('device_id', deviceId);
+  }
+  return deviceId;
 }
 
 // 更新同步状态指示器
@@ -203,14 +310,35 @@ window.retrySync = function() {
 async function loadNotesFromCloud() {
   if (!currentUser || !window.firebaseDB) return;
   
+  // 如果正在同步中，等待一段时间后重试
+  if (isSyncing) {
+    console.log('已有同步任务在进行中，稍后将重试加载云端数据');
+    setTimeout(() => {
+      if (!isSyncing) {
+        loadNotesFromCloud();
+      }
+    }, 3000);
+    return;
+  }
+  
   try {
-    console.log('正在从云端加载便签...');
+    // 设置同步状态
+    isSyncing = true;
     updateSyncStatus('syncing');
+    console.log('正在从云端加载便签...');
     
-    // 调用Firebase加载函数
-    const result = await window.firebaseDB.loadNotesFromCloud(currentUser.uid);
+    // 获取上次同步时间戳，用于增量同步
+    const lastSyncTimestamp = localStorage.getItem('last_sync_timestamp');
+    const lastSyncVersion = localStorage.getItem('last_sync_version');
     
-    if (result && result.notes) {
+    // 调用Firebase加载函数，传入增量同步参数
+    const result = await window.firebaseDB.loadNotesFromCloud(currentUser.uid, {
+      lastSyncTimestamp,
+      lastSyncVersion,
+      deviceId: getDeviceId()
+    });
+    
+    if (result && result.notes && result.notes.length > 0) {
       console.log('从云端加载到便签数据:', result.notes.length, '条记录');
       
       // 获取本地便签
@@ -219,32 +347,107 @@ async function loadNotesFromCloud() {
       // 合并云端和本地便签（去重）
       const mergedNotes = mergeNotes(localNotes, result.notes);
       
-      // 更新本地存储
-      localStorage.setItem('floaty_notes', JSON.stringify(mergedNotes));
+      // 检查是否有变化
+      const hasChanges = JSON.stringify(localNotes) !== JSON.stringify(mergedNotes);
       
-      // 触发storage事件，更新界面
-      window.dispatchEvent(new StorageEvent('storage', {
-        key: 'floaty_notes',
-        newValue: JSON.stringify(mergedNotes)
-      }));
-      
-      // 更新便签列表
-      updateAllNotes();
+      if (hasChanges) {
+        console.log('本地和云端数据存在差异，正在更新本地存储');
+        
+        // 更新本地存储
+        localStorage.setItem('floaty_notes', JSON.stringify(mergedNotes));
+        
+        // 触发storage事件，更新界面
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'floaty_notes',
+          newValue: JSON.stringify(mergedNotes)
+        }));
+        
+        // 更新便签列表
+        updateAllNotes();
+        
+        // 如果是增量同步且有冲突，重新同步到云端
+        if (result.hasConflicts) {
+          console.log('检测到数据冲突，将重新同步到云端');
+          setTimeout(() => {
+            isSyncing = false;
+            syncNotesToCloud(mergedNotes);
+          }, 1000);
+        }
+      } else {
+        console.log('本地和云端数据一致，无需更新');
+      }
       
       // 更新同步状态
       lastSyncTime = new Date();
       lastSyncStatus = 'success';
       updateSyncStatus('success');
       
+      // 更新最后同步时间戳
+      localStorage.setItem('last_sync_timestamp', Date.now());
+      if (result.syncVersion) {
+        localStorage.setItem('last_sync_version', result.syncVersion);
+        window.syncVersion = result.syncVersion;
+      }
+      
+      return true;
+    } else if (result && result.noChanges) {
+      // 云端数据没有变化
+      console.log('云端数据没有变化，无需更新');
+      updateSyncStatus('success');
+      lastSyncTime = new Date();
+      lastSyncStatus = 'success';
       return true;
     } else {
       console.log('云端没有便签数据或加载失败');
-      updateSyncStatus('success');
+      
+      // 检查是否是首次同步
+      const isFirstSync = !localStorage.getItem('last_sync_timestamp');
+      
+      if (isFirstSync && getNotes().length > 0) {
+        // 首次同步且本地有数据，将本地数据同步到云端
+        console.log('首次同步，将本地数据同步到云端');
+        setTimeout(() => {
+          isSyncing = false;
+          syncNotesToCloud(getNotes());
+        }, 1000);
+      } else {
+        updateSyncStatus('success');
+      }
+      
       return false;
     }
   } catch (error) {
     console.error('从云端加载便签失败:', error);
-    updateSyncStatus('error', error.message);
+    
+    // 检查是否是网络错误
+    const isNetworkError = error.message.includes('network') || 
+                          !window.navigator.onLine || 
+                          error.name === 'AbortError';
+    
+    if (isNetworkError) {
+      updateSyncStatus('error', '网络连接问题，将在网络恢复后重试');
+      
+      // 添加网络恢复事件监听
+      window.addEventListener('online', function onlineHandler() {
+        console.log('网络已恢复，尝试重新加载云端数据');
+        window.removeEventListener('online', onlineHandler);
+        setTimeout(() => {
+          isSyncing = false;
+          loadNotesFromCloud();
+        }, 2000);
+      });
+    } else {
+      updateSyncStatus('error', error.message);
+      
+      // 其他错误，稍后重试
+      setTimeout(() => {
+        isSyncing = false;
+        if (window.navigator.onLine) {
+          loadNotesFromCloud();
+        }
+      }, 10000); // 10秒后重试
+    }
+    
     return false;
   } finally {
     // 确保同步状态被重置
@@ -261,15 +464,54 @@ function mergeNotes(localNotes, cloudNotes) {
   
   // 先添加本地便签
   localNotes.forEach(note => {
+    if (!note.id) {
+      // 确保每个便签都有ID
+      note.id = uuid();
+    }
+    if (!note.updatedAt) {
+      // 确保每个便签都有更新时间
+      note.updatedAt = Date.now();
+    }
     notesMap.set(note.id, note);
   });
   
   // 再添加云端便签，如果ID已存在则比较更新时间
   cloudNotes.forEach(note => {
+    if (!note.id) {
+      // 确保每个便签都有ID
+      note.id = uuid();
+    }
+    if (!note.updatedAt) {
+      // 确保每个便签都有更新时间
+      note.updatedAt = Date.now();
+    }
+    
     const existingNote = notesMap.get(note.id);
     
-    if (!existingNote || (note.updatedAt > existingNote.updatedAt)) {
+    if (!existingNote) {
+      // 本地没有这个便签，直接添加
       notesMap.set(note.id, note);
+    } else {
+      // 本地有这个便签，比较更新时间
+      const localTime = existingNote.updatedAt || 0;
+      const cloudTime = note.updatedAt || 0;
+      
+      // 如果云端便签更新，或者时间相同但内容不同（冲突情况）
+      if (cloudTime > localTime) {
+        // 云端更新，使用云端版本
+        notesMap.set(note.id, note);
+      } else if (cloudTime === localTime && existingNote.content !== note.content) {
+        // 时间相同但内容不同，这是一种冲突情况
+        // 创建一个合并版本，保留两者内容
+        const mergedNote = {
+          ...note,
+          content: `${existingNote.content}\n\n--- 合并的内容 ---\n\n${note.content}`,
+          updatedAt: Date.now(), // 更新时间戳
+          merged: true // 标记为合并的便签
+        };
+        notesMap.set(note.id, mergedNote);
+      }
+      // 如果本地更新，保留本地版本
     }
   });
   
@@ -843,9 +1085,74 @@ function mergeNotes(localNotes, cloudNotes) {
     
     console.log('设置自动同步功能');
     
+    // 实时监听云端数据变化
+    let unsubscribeWatch = null;
+    if (window.firebaseDB && window.firebaseDB.watchCloudNotes) {
+      unsubscribeWatch = window.firebaseDB.watchCloudNotes(currentUser.uid, (cloudData) => {
+        console.log('检测到云端数据变化，正在更新本地数据');
+        
+        // 检查是否是当前设备的更新
+        const currentDeviceId = getDeviceId();
+        if (cloudData.deviceId === currentDeviceId) {
+          console.log('忽略当前设备的更新');
+          return;
+        }
+        
+        // 获取云端便签数据
+        if (cloudData.notes && cloudData.notes.length > 0) {
+          // 处理时间戳
+          const processedNotes = cloudData.notes.map(note => {
+            if (note.updatedAt && typeof note.updatedAt.toDate === 'function') {
+              note.updatedAt = note.updatedAt.toDate().getTime();
+            }
+            if (note.createdAt && typeof note.createdAt.toDate === 'function') {
+              note.createdAt = note.createdAt.toDate().getTime();
+            }
+            return note;
+          });
+          
+          // 获取本地便签
+          const localNotes = getNotes();
+          
+          // 合并云端和本地便签
+          const mergedNotes = mergeNotes(localNotes, processedNotes);
+          
+          // 更新本地存储
+          localStorage.setItem('floaty_notes', JSON.stringify(mergedNotes));
+          
+          // 触发storage事件，更新界面
+          window.dispatchEvent(new StorageEvent('storage', {
+            key: 'floaty_notes',
+            newValue: JSON.stringify(mergedNotes)
+          }));
+          
+          // 更新便签列表
+          updateAllNotes();
+          
+          // 更新同步状态
+          lastSyncTime = new Date();
+          lastSyncStatus = 'success';
+          
+          // 显示通知
+          if (window.showToast) {
+            window.showToast('便签已从其他设备同步', 'info');
+          }
+          
+          // 更新同步版本号
+          if (cloudData.syncVersion) {
+            localStorage.setItem('last_sync_version', cloudData.syncVersion);
+            window.syncVersion = cloudData.syncVersion;
+          }
+          
+          // 更新最后同步时间戳
+          localStorage.setItem('last_sync_timestamp', Date.now());
+        }
+      });
+    }
+    
     // 定期同步（每5分钟）
     const syncInterval = setInterval(() => {
-      if (currentUser && !isSyncing) {
+      if (currentUser && !isSyncing && window.navigator.onLine) {
         console.log('执行定期自动同步...');
         const notes = getNotes();
         if (notes && notes.length > 0) {
@@ -863,7 +1170,12 @@ function mergeNotes(localNotes, cloudNotes) {
           // 使用同步方式发送请求，确保在页面关闭前完成
           navigator.sendBeacon(
             'https://tixinme.firebaseio.com/user_notes/' + currentUser.uid + '.json',
-            JSON.stringify({ notes: notes, updatedAt: Date.now() })
+            JSON.stringify({ 
+              notes: notes, 
+              updatedAt: Date.now(),
+              deviceId: getDeviceId(),
+              syncVersion: (window.syncVersion || 0) + 1
+            })
           );
         }
       }
@@ -877,28 +1189,62 @@ function mergeNotes(localNotes, cloudNotes) {
           const notes = getNotes();
           if (notes && notes.length > 0) {
             syncNotesToCloud(notes);
+          } else {
+            // 如果本地没有便签，尝试从云端加载
+            loadNotesFromCloud();
           }
         }, 2000);
       }
     });
     
-    return syncInterval;
+    // 存储事件监听，当便签内容变化时自动同步
+    window.addEventListener('storage', (e) => {
+      if (e.key === 'floaty_notes' && currentUser && !isSyncing && window.navigator.onLine) {
+        console.log('检测到便签内容变化，自动同步到云端');
+        try {
+          const notes = JSON.parse(e.newValue || '[]');
+          if (notes && notes.length > 0) {
+            // 使用防抖动，避免频繁同步
+            clearTimeout(window.syncDebounceTimer);
+            window.syncDebounceTimer = setTimeout(() => {
+              syncNotesToCloud(notes);
+            }, 3000); // 3秒后执行同步
+          }
+        } catch (err) {
+          console.error('解析便签内容失败:', err);
+        }
+      }
+    });
+    
+    // 返回清理函数和同步间隔
+    return {
+      unsubscribeWatch,
+      syncInterval
+    };
   }
   
   // 启动自动同步
   let autoSyncInterval;
+  let autoSyncWatcher;
   
   // 监听用户状态变化
   authStateListener(user => {
-    // 清除之前的同步间隔
+    // 清除之前的同步间隔和监听器
     if (autoSyncInterval) {
       clearInterval(autoSyncInterval);
       autoSyncInterval = null;
     }
     
+    if (autoSyncWatcher && typeof autoSyncWatcher.unsubscribeWatch === 'function') {
+      autoSyncWatcher.unsubscribeWatch();
+      autoSyncWatcher = null;
+    }
+    
     // 如果用户已登录，设置自动同步
     if (user) {
-      autoSyncInterval = setupAutoSync();
+      const syncHandlers = setupAutoSync();
+      autoSyncInterval = syncHandlers.syncInterval;
+      autoSyncWatcher = syncHandlers;
     }
   });
 })();
