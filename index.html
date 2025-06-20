@@ -12,6 +12,46 @@
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 		<meta name="apple-mobile-web-app-title" content="提醒我">
 		<style>
+		/* Toast提醒样式 */
+		.toast-container {
+		  position: fixed;
+		  top: 70px;
+		  left: 50%;
+		  transform: translateX(-50%);
+		  z-index: 10000;
+		  display: flex;
+		  flex-direction: column;
+		  align-items: center;
+		  gap: 10px;
+		  pointer-events: none;
+		}
+		.toast {
+		  padding: 10px 16px;
+		  background-color: rgba(45, 55, 72, 0.9);
+		  color: #fff;
+		  border-radius: 6px;
+		  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+		  font-size: 14px;
+		  max-width: 90vw;
+		  text-align: center;
+		  opacity: 0;
+		  transform: translateY(-20px);
+		  transition: opacity 0.3s, transform 0.3s;
+		  pointer-events: none;
+		}
+		.toast.success {
+		  background-color: rgba(22, 101, 52, 0.9);
+		}
+		.toast.error {
+		  background-color: rgba(185, 28, 28, 0.9);
+		}
+		.toast.info {
+		  background-color: rgba(3, 105, 161, 0.9);
+		}
+		.toast.show {
+		  opacity: 1;
+		  transform: translateY(0);
+		}
 		.main-note {
 		  margin-top: 0;
 		  max-width: 420px;
@@ -606,7 +646,9 @@
 					// 调用Firebase登录方法
 					await firebaseAuth.signIn(email, password);
 					console.log('登录成功:', email);
-					alert('登录成功！');
+					if (window.showToast) {
+						window.showToast('登录成功！', 'success');
+					}
 					closeLoginModal();
 					
 					// 刷新页面以更新用户状态
@@ -648,7 +690,9 @@
 					// 调用Firebase注册方法
 					await firebaseAuth.createUser(email, password);
 					console.log('注册成功:', email);
-					alert('注册成功！');
+					if (window.showToast) {
+						window.showToast('注册成功！', 'success');
+					}
 					closeRegisterModal();
 					
 					// 刷新页面以更新用户状态
@@ -694,7 +738,9 @@
 						photoURL: user.photoURL
 					});
 					
-					alert('Google登录成功！');
+					if (window.showToast) {
+						window.showToast('Google登录成功！', 'success');
+					}
 					closeLoginModal();
 					
 					// 刷新页面以更新用户状态
@@ -825,11 +871,15 @@
 							try {
 								const firebaseAuth = await waitForFirebase();
 								await firebaseAuth.logOut();
-								alert('已退出登录');
+								if (window.showToast) {
+									window.showToast('已退出登录', 'success');
+								}
 								location.reload();
 							} catch (error) {
 								console.error('退出失败:', error);
-								alert('退出失败: ' + error.message);
+								if (window.showToast) {
+									window.showToast('退出失败: ' + error.message, 'error');
+								}
 							}
 						};
 						dropdownMenu.appendChild(logoutBtn);
@@ -979,6 +1029,9 @@
 				}
 			}, 5000);
 		</script>
+		
+		<!-- Toast提醒容器 -->
+		<div class="toast-container" id="toast-container"></div>
 		
 		<script type="module" src="index.js"></script>
 		<script src="floaty.js"></script>

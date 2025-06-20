@@ -42,7 +42,7 @@ function setupMobileNewNoteBtn() {
       const floatyNote = document.getElementById('floaty-note');
       if (!floatyNote) {
         console.error('内联便签容器不存在，无法创建内联便签');
-        alert('创建便签失败：缺少必要的DOM元素');
+        showToast('创建便签失败：缺少必要的DOM元素', 'error');
         return;
       }
       
@@ -52,7 +52,7 @@ function setupMobileNewNoteBtn() {
         window.showInlineNote('');
       } else {
         console.error('无法找到创建便签的函数');
-        alert('创建便签失败：无法找到创建函数');
+        showToast('创建便签失败：无法找到创建函数', 'error');
       }
     };
   }
@@ -155,3 +155,42 @@ window.addEventListener('resize', checkMobileView);
   });
   setInterval(updateUserNote, 1000);
 })();
+
+/**
+ * 显示顶部Toast提醒
+ * @param {string} message - 提醒消息
+ * @param {string} type - 提醒类型: 'success', 'error', 'info'
+ * @param {number} duration - 显示时长(毫秒)，默认3000ms
+ */
+function showToast(message, type = 'info', duration = 3000) {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  
+  // 创建toast元素
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  
+  // 添加到容器
+  container.appendChild(toast);
+  
+  // 触发重排以应用过渡效果
+  setTimeout(() => {
+    toast.classList.add('show');
+  }, 10);
+  
+  // 设置自动消失
+  setTimeout(() => {
+    toast.classList.remove('show');
+    
+    // 等待过渡完成后移除元素
+    setTimeout(() => {
+      if (container.contains(toast)) {
+        container.removeChild(toast);
+      }
+    }, 300);
+  }, duration);
+}
+
+// 将toast函数暴露为全局函数
+window.showToast = showToast;

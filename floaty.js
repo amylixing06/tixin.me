@@ -818,11 +818,15 @@ function mergeNotes(localNotes, cloudNotes) {
         })
         .catch(e => {
           console.error('PiP 窗口创建失败:', e);
-          alert('全局悬浮失败：' + e.message + '\n\n请确认您使用的是最新版Chrome浏览器，并已开启"启用画中画API"功能。');
+          if (window.showToast) {
+            window.showToast('全局悬浮失败：' + e.message + '，请确认您使用的是最新版Chrome浏览器', 'error', 5000);
+          }
         });
     } catch (e) {
       console.error('创建悬浮便签出错:', e);
-      alert('创建悬浮便签失败: ' + e.message);
+      if (window.showToast) {
+        window.showToast('创建悬浮便签失败: ' + e.message, 'error');
+      }
     }
   }
   
@@ -1016,11 +1020,15 @@ if (navbarMenu) {
               })
               .catch(error => {
                 console.error('退出登录失败:', error);
-                alert('退出登录失败: ' + error.message);
+                if (window.showToast) {
+                  window.showToast('退出登录失败: ' + error.message, 'error');
+                }
               });
           } else {
             console.error('未找到退出登录方法');
-            alert('退出登录功能暂不可用');
+            if (window.showToast) {
+              window.showToast('退出登录功能暂不可用', 'error');
+            }
           }
         };
         userDropdown.appendChild(logoutBtn);
