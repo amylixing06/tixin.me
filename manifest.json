@@ -1,6 +1,6 @@
 {
-  "name": "全局悬浮便签",
-  "short_name": "悬浮便签",
+  "name": "提醒我 - 全局悬浮便签",
+  "short_name": "提醒我",
   "start_url": ".",
   "display": "standalone",
   "background_color": "#f6f6f6",
