@@ -663,15 +663,12 @@ function mergeNotes(localNotes, cloudNotes) {
     notes.forEach(note => {
       html += `
         <div class="note-item" data-id="${note.id}" style="background:${note.color || COLORS[0]};margin-bottom:15px;padding:12px 16px;border-radius:8px;position:relative;">
-          <div class="note-content" style="word-break:break-all;margin-right:25px;">${note.content || ''}</div>
-          <div class="note-actions" style="position:absolute;top:8px;right:8px;">
-            <button class="delete-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">❌</button>
-          </div>
+          <div class="note-content" style="word-break:break-all;margin-right:25px; cursor:pointer;">${note.content || ''}</div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
             <div class="note-time" style="font-size:12px;color:#666;text-align:left;">
               ${new Date(note.updatedAt || Date.now()).toLocaleString()}
             </div>
-            <button class="edit-note-btn" data-id="${note.id}" style="background:none;border:none;cursor:pointer;padding:4px;">🖋️</button>
+            <button class="delete-note-btn" data-id="${note.id}" title="删除便签" style="background:none;border:none;cursor:pointer;padding:4px;">❌</button>
           </div>
         </div>
       `;
@@ -694,7 +691,7 @@ function mergeNotes(localNotes, cloudNotes) {
       };
     });
     
-    // 编辑按钮事件
+    // 编辑按钮事件 (此按钮已在HTML中移除，但保留逻辑以防未来恢复)
     notesList.querySelectorAll('.edit-note-btn').forEach(btn => {
       btn.onclick = function(e) {
         e.stopPropagation();
