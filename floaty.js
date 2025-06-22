@@ -663,7 +663,7 @@ function mergeNotes(localNotes, cloudNotes) {
     notes.forEach(note => {
       html += `
         <div class="note-item" data-id="${note.id}" style="background:${note.color || COLORS[0]};margin-bottom:15px;padding:12px 16px;border-radius:8px;position:relative;">
-          <div class="note-content" style="word-break:break-all;margin-right:25px; cursor:pointer;">${note.content || ''}</div>
+          <div class="note-content" style="word-break:break-all; cursor:pointer;">${note.content || ''}</div>
           <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;">
             <div class="note-time" style="font-size:12px;color:#666;text-align:left;">
               ${new Date(note.updatedAt || Date.now()).toLocaleString()}
