@@ -682,15 +682,19 @@ function mergeNotes(localNotes, cloudNotes) {
     // 点击便签内容区域也可以编辑
     notesList.querySelectorAll('.note-content').forEach(content => {
       content.onclick = function() {
-        const noteId = this.parentNode.getAttribute('data-id');
-        const note = notes.find(n => n.id === noteId);
-        if (note) {
-          if ('documentPictureInPicture' in window) {
-            openFloatyNote(note.content, noteId);
-          } else {
-            showInlineNote(note.content, noteId);
+        // 新增：只在移动端（屏幕宽度小于768px）响应点击事件来打开画中画
+        if (window.innerWidth < 768) {
+          const noteId = this.parentNode.getAttribute('data-id');
+          const note = notes.find(n => n.id === noteId);
+          if (note) {
+            if ('documentPictureInPicture' in window) {
+              openFloatyNote(note.content, noteId);
+            } else {
+              showInlineNote(note.content, noteId);
+            }
           }
         }
+        // 在桌面端，点击便签内容不执行任何操作，鼓励用户使用编辑按钮
       };
     });
     
