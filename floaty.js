@@ -682,14 +682,8 @@ function mergeNotes(localNotes, cloudNotes) {
         const noteId = this.parentNode.getAttribute('data-id');
         const notes = getNotes();
         const note = notes.find(n => n.id === noteId);
-        if (!note) return;
-        
-        // 根据设备类型决定打开编辑模式还是只读模式
-        if (window.innerWidth < 768) {
-          // 移动端：打开只读的悬浮展示窗口
-          openFloatyDisplay(note.content, note.color);
-        } else {
-          // 桌面端：打开可编辑的画中画窗口
+        if (note) {
+          // 恢复原有逻辑：优先使用画中画，如果不支持则使用内联便签
           if ('documentPictureInPicture' in window) {
             openFloatyNote(note.content, noteId);
           } else {
