@@ -680,8 +680,16 @@ function mergeNotes(localNotes, cloudNotes) {
     notesList.querySelectorAll('.note-content').forEach(content => {
       content.onclick = function() {
         const noteId = this.parentNode.getAttribute('data-id');
+        const notes = getNotes();
         const note = notes.find(n => n.id === noteId);
-        if (note) {
+        if (!note) return;
+        
+        // 根据设备类型决定打开编辑模式还是只读模式
+        if (window.innerWidth < 768) {
+          // 移动端：打开只读的悬浮展示窗口
+          openFloatyDisplay(note.content, note.color);
+        } else {
+          // 桌面端：打开可编辑的画中画窗口
           if ('documentPictureInPicture' in window) {
             openFloatyNote(note.content, noteId);
           } else {
@@ -1401,5 +1409,63 @@ if (navbarMenu) {
     if (loginBtn) loginBtn.style.display = '';
     if (registerBtn) registerBtn.style.display = '';
     avatar.style.display = 'none';
+  }
+}
+
+// 新增：打开一个只读的、用于悬浮展示的画中画窗口
+async function openFloatyDisplay(content, color) {
+  if (!('documentPictureInPicture' in window)) {
+    console.error('当前浏览器不支持全局悬浮便签');
+    showToast('浏览器不支持此功能', 'error');
+    return;
+  }
+
+  try {
+    const pipWindow = await documentPictureInPicture.requestWindow({
+      width: 380,
+      height: 520,
+    });
+
+    // 注入样式
+    const style = document.createElement('style');
+    style.textContent = `
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+        background-color: ${color || '#fffbe6'};
+        padding: 18px;
+        box-sizing: border-box;
+        color: #222;
+        line-height: 1.7;
+        overflow: hidden;
+      }
+      .content-display {
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 1.08rem;
+        height: 100%;
+        overflow-y: auto;
+        scrollbar-width: thin;
+        scrollbar-color: #ccc transparent;
+      }
+      .content-display::-webkit-scrollbar {
+        width: 5px;
+      }
+      .content-display::-webkit-scrollbar-thumb {
+        background-color: #ccc;
+        border-radius: 3px;
+      }
+    `;
+    pipWindow.document.head.appendChild(style);
+
+    // 创建内容容器
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'content-display';
+    contentDiv.textContent = content;
+    pipWindow.document.body.appendChild(contentDiv);
+
+  } catch (error) {
+    console.error("打开画中画窗口失败:", error);
+    showToast('打开悬浮窗失败，请重试', 'error');
   }
 } 
